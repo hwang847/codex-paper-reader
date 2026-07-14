@@ -17,7 +17,7 @@ TOOL = ROOT / "scripts" / "paper_workflow.py"
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from build_paper_index import looks_generic_title  # noqa: E402
-from paper_workflow import method_like_section, resolve_pdf, section_candidates  # noqa: E402
+from paper_workflow import classify_paper, method_like_section, resolve_pdf, section_candidates  # noqa: E402
 
 
 def run(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
@@ -63,6 +63,57 @@ Results follow.
     assert looks_generic_title("Findings of the Association for Computational Linguistics: ACL 2025")
     assert looks_generic_title("Proceedings of the 64th Annual Meeting of the Association for Computational Linguistics")
     assert not looks_generic_title("What Paper Titles Teach Us About Reliable Indexing")
+    gated_rules = {
+        "default_category": "general-rl",
+        "categories": [
+            {
+                "name": "text2sql-rl",
+                "keywords": ["reinforcement"],
+                "requires_any": ["text-to-sql", "text to sql"],
+            },
+            {"name": "general-rl", "keywords": ["reinforcement"]},
+        ],
+    }
+    text2sql_category, _ = classify_paper(
+        {"aliases": []},
+        "Reinforcement Learning for Text-to-SQL",
+        gated_rules,
+        "text_rl.pdf",
+    )
+    general_category, _ = classify_paper(
+        {"aliases": []},
+        "Reinforcement Learning for Language Agents",
+        gated_rules,
+        "agent_rl.pdf",
+    )
+    assert text2sql_category == "text2sql-rl"
+    assert general_category == "general-rl"
+    strict_rules = {
+        "default_category": "general-rl",
+        "categories": [
+            {
+                "name": "trace-rl",
+                "keywords": ["reinforcement"],
+                "requires_any": ["text-to-sql"],
+                "requires_all": ["reinforcement", "trace"],
+            },
+            {"name": "general-rl", "keywords": ["reinforcement"]},
+        ],
+    }
+    trace_category, _ = classify_paper(
+        {"aliases": []},
+        "Reinforcement Learning from a Text-to-SQL Trace",
+        strict_rules,
+        "trace_rl.pdf",
+    )
+    missing_requirement_category, _ = classify_paper(
+        {"aliases": []},
+        "Reinforcement Learning for Text-to-SQL",
+        strict_rules,
+        "plain_rl.pdf",
+    )
+    assert trace_category == "trace-rl"
+    assert missing_requirement_category == "general-rl"
 
     with tempfile.TemporaryDirectory() as tmp:
         workspace = Path(tmp) / "workspace"

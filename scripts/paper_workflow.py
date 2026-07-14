@@ -284,7 +284,20 @@ def load_organization_rules(root: Path, rules: str | None = None) -> dict:
         keywords = item.get("keywords", [])
         if not isinstance(keywords, list) or not all(isinstance(value, str) for value in keywords):
             raise WorkflowError("invalid_organization_rules", f"invalid keywords for category {item['name']}")
-        categories.append({"name": name, "keywords": keywords})
+        requires_any = item.get("requires_any", [])
+        requires_all = item.get("requires_all", [])
+        if not isinstance(requires_any, list) or not all(isinstance(value, str) for value in requires_any):
+            raise WorkflowError("invalid_organization_rules", f"invalid requires_any for category {item['name']}")
+        if not isinstance(requires_all, list) or not all(isinstance(value, str) for value in requires_all):
+            raise WorkflowError("invalid_organization_rules", f"invalid requires_all for category {item['name']}")
+        categories.append(
+            {
+                "name": name,
+                "keywords": keywords,
+                "requires_any": requires_any,
+                "requires_all": requires_all,
+            }
+        )
     payload["categories"] = categories
     payload.setdefault("default_category", "uncategorized")
     payload.setdefault("title_overrides", {})
@@ -359,6 +372,12 @@ def classify_paper(item: dict, title: str, rules: dict, rel_path: str) -> tuple[
     scored: list[tuple[int, int, str, list[str]]] = []
     for priority, entry in enumerate(rules["categories"]):
         name = str(entry["name"])
+        requires_any = entry.get("requires_any", [])
+        requires_all = entry.get("requires_all", [])
+        if requires_any and not any(keyword_matches(evidence, keyword) for keyword in requires_any):
+            continue
+        if requires_all and not all(keyword_matches(evidence, keyword) for keyword in requires_all):
+            continue
         unique_keywords = {normalize(keyword).replace("_", " "): keyword for keyword in entry.get("keywords", [])}
         matches = [keyword for normalized, keyword in unique_keywords.items() if keyword_matches(evidence, normalized)]
         if matches:

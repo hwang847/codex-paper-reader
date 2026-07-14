@@ -8,6 +8,7 @@
 
 - Added opt-in PDF organization: detect titles, normalize filenames, assign one category, and preserve duplicate files.
 - Added editable workspace rules at `references/organization_rules.json`; new workspaces receive a general starter taxonomy.
+- Added `requires_any` and `requires_all` rule gates, so a topic-specific category can require an explicit domain signal before it applies.
 - Keep the search index, source registry, BibTeX `Source` comments, and local note links synchronized after files move.
 - Reject unsafe category paths and leave ambiguous papers in the fallback category.
 

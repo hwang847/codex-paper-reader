@@ -54,7 +54,7 @@ When the user asks to set up, initialize, or configure a literature workspace:
 7. When future conversation reveals stable preference changes, maintain `AGENTS.md` so it stays current.
 
 This skill provides a base workflow, not a final universal policy. Let the user's local `AGENTS.md` evolve through conversation.
-Use `organize --apply` when the workspace policy enables automatic filing or the user asks to organize. The command uses local rules, preserves duplicates with collision suffixes, updates local references, and leaves low-confidence items in the configured fallback category. Codex may review or edit the rules when the user's preferred taxonomy changes.
+Use `organize --apply` when the workspace policy enables automatic filing or the user asks to organize. The command uses local rules, preserves duplicates with collision suffixes, updates local references, and leaves low-confidence items in the configured fallback category. Categories can use `requires_any` or `requires_all` to limit a topic-specific rule to matching documents. Codex may review or edit the rules when the user's preferred taxonomy changes.
 
 ## Folder Contract
 

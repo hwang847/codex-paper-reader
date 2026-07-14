@@ -8,6 +8,7 @@
 
 - 新增可选的 PDF 自动归档：识别标题、规范化文件名、分入唯一分类，并保留同名副本。
 - 工作区现在有可编辑的 `references/organization_rules.json`；新工作区会获得通用的初始分类。
+- 新增 `requires_any` 与 `requires_all` 规则门槛，使专题分类可要求明确的领域信号后才生效。
 - 文件移动后，搜索索引、source registry、BibTeX `Source` 注释和本地笔记链接会同步更新。
 - 拒绝不安全的分类路径；无法确定的论文保留在兜底分类。
 
