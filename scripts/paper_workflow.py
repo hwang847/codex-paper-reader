@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import unicodedata
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
@@ -25,10 +26,15 @@ ARXIV_IN_TEXT_RE = re.compile(r"(?P<id>\d{4}\.\d{4,5})(?P<version>v\d+)?")
 AMBIGUITY_MARGIN = 0.03
 MIN_CONFIDENT_SCORE = 0.92
 SOURCE_REGISTRY = Path("references/source_registry.jsonl")
-SOURCE_KINDS = {"paper", "tech_doc", "spec", "blog", "repo", "dataset", "slides", "unknown"}
+SOURCE_KINDS = {"paper", "survey", "tech_doc", "spec", "blog", "repo", "dataset", "slides", "unknown"}
 LOCAL_SOURCE_TYPES = {"pdf", "doc", "html", "text", "path"}
-WORKSPACE_DIRS = ("papers", "notes", "notes/assets", "references")
+WORKSPACE_DIRS = ("papers", "notes", "notes/assets", "references", "surveys", "surveys/sources")
 ORGANIZATION_RULES = Path("references/organization_rules.json")
+SURVEYS_DIR = Path("surveys")
+SURVEY_SOURCES_DIR = SURVEYS_DIR / "sources"
+SURVEY_MANIFEST = "manifest.json"
+SURVEY_READING_PACK = "reading_pack.md"
+SURVEY_DOCUMENT_SUFFIXES = {".md", ".txt", ".rst", ".html", ".htm", ".docx"}
 
 DEFAULT_ORGANIZATION_RULES = {
     "version": 1,
@@ -214,16 +220,21 @@ def resolve_pdf(root: Path, query: str) -> tuple[Path, dict | None]:
             aliases.extend(str(alias) for alias in item.get("aliases", []) if alias)
             if normalized_query in {normalize(alias) for alias in aliases if alias}:
                 exact.append(item)
-        if len(exact) == 1 and exact[0].get("path"):
-            return (root / str(exact[0]["path"])).resolve(), exact[0]
+        if len(exact) == 1:
+            if exact[0].get("path"):
+                return (root / str(exact[0]["path"])).resolve(), exact[0]
+            raise WorkflowError("no_pdf_source", f"matched entity has no local PDF source: {exact[0].get('title', query)}", exact[0])
         if len(exact) > 1:
             raise WorkflowError("ambiguous_match", "paper query is ambiguous", exact)
     matches = find_matches(root, query, 5)
     if not matches:
         raise WorkflowError("no_match", f"no paper match: {query}")
-    top = matches[0]
-    if len(matches) > 1:
-        second = matches[1]
+    pdf_matches = [item for item in matches if item.get("path")]
+    if not pdf_matches:
+        raise WorkflowError("no_pdf_source", f"matched entity has no local PDF source: {matches[0].get('title', query)}", matches[0])
+    top = pdf_matches[0]
+    if len(pdf_matches) > 1:
+        second = pdf_matches[1]
         near_tie = top["score"] - second["score"] <= AMBIGUITY_MARGIN
         generic_query = len(re.sub(r"[^A-Za-z0-9]", "", query)) <= 4
         if top["score"] < MIN_CONFIDENT_SCORE or (top["score"] < 0.99 and (near_tie or generic_query)):
@@ -496,6 +507,35 @@ def rewrite_source_registry(root: Path, mapping: dict[str, str]) -> None:
     write_source_records(root, records)
 
 
+def protected_local_document_paths(root: Path) -> set[Path]:
+    """Return registered non-PDF sources whose authoring content is immutable."""
+    protected: set[Path] = set()
+    for record in load_source_records(root):
+        for source in record.get("sources", []):
+            if not isinstance(source, dict):
+                continue
+            source_type = str(source.get("type", "")).lower()
+            if source_type not in LOCAL_SOURCE_TYPES or source_type == "pdf":
+                continue
+            locator = str(source.get("locator", ""))
+            if not locator:
+                continue
+            path = local_source_path(root, locator, source_type)
+            if path is not None:
+                protected.add(path)
+    return protected
+
+
+def is_managed_reference_file(root: Path, path: Path) -> bool:
+    if path.is_relative_to(root / "notes"):
+        return True
+    try:
+        relative = path.relative_to(root / SURVEYS_DIR)
+    except ValueError:
+        return False
+    return len(relative.parts) == 2 and path.name in {SURVEY_MANIFEST, SURVEY_READING_PACK}
+
+
 def rewrite_workspace_references(root: Path, mapping: dict[str, str]) -> None:
     if not mapping:
         return
@@ -506,11 +546,18 @@ def rewrite_workspace_references(root: Path, mapping: dict[str, str]) -> None:
         root / "references/source_registry.jsonl",
         root / "references/references.bib",
     }
+    protected_paths = protected_local_document_paths(root)
     for path in root.rglob("*"):
         if not path.is_file() or path.suffix.lower() not in text_suffixes:
             continue
         relative = path.relative_to(root)
-        if ".git" in relative.parts or path.is_relative_to(root / "papers") or path in managed_paths:
+        if (
+            ".git" in relative.parts
+            or path.is_relative_to(root / "papers")
+            or path in managed_paths
+            or path.resolve() in protected_paths
+            or not is_managed_reference_file(root, path)
+        ):
             continue
         try:
             text = path.read_text(encoding="utf-8")
@@ -859,6 +906,342 @@ def record_from_index_item(item: dict) -> dict:
             else []
         ),
     }
+
+
+def relative_locator(root: Path, path: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(root))
+    except ValueError:
+        return str(path.resolve())
+
+
+def source_record_for_source(records: list[dict], source: dict) -> dict | None:
+    key = source_key(source)
+    for record in records:
+        for candidate in record.get("sources", []):
+            if isinstance(candidate, dict) and source_key(candidate) == key:
+                return record
+    return None
+
+
+def unique_record_id(records: list[dict], title: str) -> str:
+    base = entity_id(title) or "source"
+    existing = {str(record.get("id", "")) for record in records}
+    if base not in existing:
+        return base
+    for suffix in range(2, 1000):
+        candidate = f"{base}_{suffix}"
+        if candidate not in existing:
+            return candidate
+    raise WorkflowError("entity_id_collision", f"too many source entities named like: {base}")
+
+
+def resolve_local_document(root: Path, value: str) -> Path:
+    path = Path(os.path.expanduser(value))
+    if not path.is_absolute():
+        path = root / path
+    path = path.resolve()
+    if not path.exists():
+        raise WorkflowError("source_missing", f"source document does not exist: {value}")
+    if not path.is_file():
+        raise WorkflowError("source_not_file", f"source document is not a file: {value}")
+    if path.suffix.lower() not in SURVEY_DOCUMENT_SUFFIXES:
+        supported = ", ".join(sorted(SURVEY_DOCUMENT_SUFFIXES))
+        raise WorkflowError("unsupported_survey_source", f"survey sources must be one of: {supported}")
+    return path
+
+
+def inferred_document_title(path: Path) -> str:
+    if path.suffix.lower() in {".md", ".txt", ".rst", ".html", ".htm"}:
+        try:
+            text = path.read_text(encoding="utf-8", errors="ignore")[:16384]
+        except OSError:
+            text = ""
+        heading = re.search(r"(?m)^\s{0,3}#\s+(.+?)\s*$", text)
+        if heading:
+            return clean_text(heading.group(1))
+        html_title = re.search(r"(?is)<title[^>]*>\s*(.*?)\s*</title>", text)
+        if html_title:
+            return clean_text(re.sub(r"<[^>]+>", " ", html_title.group(1)))
+    fallback = re.sub(r"[_-]+", " ", path.stem).strip()
+    return fallback.title() or "Untitled Survey Source"
+
+
+def ensure_survey_document_entity(root: Path, path: Path, title: str | None = None) -> tuple[dict, dict]:
+    source_type = infer_source_type(str(path))
+    if source_type == "pdf":
+        raise WorkflowError("invalid_survey_source", "use --paper for PDFs; survey source documents must be non-PDF files")
+    source = make_source(root, str(path), source_type, role="reference")
+    if source["status"] != "available":
+        raise WorkflowError("source_missing", f"survey source is unavailable: {path}")
+
+    records = load_source_records(root)
+    existing = source_record_for_source(records, source)
+    if existing is not None:
+        return existing, source
+
+    record_title = (title or inferred_document_title(path)).strip()
+    if not record_title:
+        raise WorkflowError("empty_source_title", f"could not determine a title for source: {path}")
+    record = {
+        "id": unique_record_id(records, record_title),
+        "kind": "survey",
+        "title": record_title,
+        "aliases": [],
+        "sources": [source],
+    }
+    records.append(record)
+    write_source_records(root, records)
+    return record, source
+
+
+def move_survey_source_document(root: Path, path: Path) -> Path:
+    try:
+        path.relative_to(root)
+    except ValueError as exc:
+        raise WorkflowError("source_outside_workspace", "only source documents inside the workspace can be managed by moving") from exc
+    if path.is_relative_to(root / SURVEY_SOURCES_DIR):
+        return path
+    target_dir = root / SURVEY_SOURCES_DIR
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target = unique_path(target_dir / path.name)
+    old_source = make_source(root, str(path), infer_source_type(str(path)), role="reference")
+    try:
+        shutil.move(str(path), str(target))
+    except OSError as exc:
+        raise WorkflowError("source_move_failed", f"failed to move source document: {path}", str(exc)) from exc
+    new_source = make_source(root, str(target), infer_source_type(str(target)), role="reference")
+    mapping = {str(old_source["locator"]): str(new_source["locator"])}
+    rewrite_source_registry(root, mapping)
+    rewrite_workspace_references(root, mapping)
+    return target
+
+
+def survey_slug(title: str) -> str:
+    slug = normalize(title)[:96].strip("_")
+    if not slug:
+        raise WorkflowError("invalid_survey_title", "survey title must contain letters or numbers")
+    return slug
+
+
+def survey_manifest_paths(root: Path) -> list[Path]:
+    directory = root / SURVEYS_DIR
+    if not directory.exists():
+        return []
+    return sorted(path for path in directory.glob(f"*/{SURVEY_MANIFEST}") if path.is_file())
+
+
+def load_survey_manifest(path: Path) -> dict:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise WorkflowError("invalid_survey_manifest", f"could not read survey manifest: {path}", str(exc)) from exc
+    if not isinstance(payload, dict) or payload.get("kind") != "literature_survey":
+        raise WorkflowError("invalid_survey_manifest", f"not a literature survey manifest: {path}")
+    if not isinstance(payload.get("papers"), list) or not isinstance(payload.get("source_documents"), list):
+        raise WorkflowError("invalid_survey_manifest", f"survey manifest has invalid paper/source lists: {path}")
+    return payload
+
+
+def resolve_survey_manifest(root: Path, query: str) -> Path:
+    if not query.strip():
+        raise WorkflowError("empty_survey_query", "survey query is empty")
+    candidate_name = Path(query).name
+    if candidate_name != query or candidate_name in {".", ".."}:
+        raise WorkflowError("invalid_survey_query", "survey query must be a title or one survey directory name")
+    direct = root / SURVEYS_DIR / candidate_name / SURVEY_MANIFEST
+    if direct.exists():
+        return direct
+
+    normalized = normalize(query)
+    matches = []
+    for path in survey_manifest_paths(root):
+        payload = load_survey_manifest(path)
+        candidates = {normalize(path.parent.name), normalize(str(payload.get("slug", ""))), normalize(str(payload.get("title", "")))}
+        if normalized in candidates:
+            matches.append(path)
+    if not matches:
+        raise WorkflowError("survey_not_found", f"no survey found: {query}")
+    if len(matches) > 1:
+        raise WorkflowError("ambiguous_survey", f"survey query is ambiguous: {query}", [str(path.relative_to(root)) for path in matches])
+    return matches[0]
+
+
+def survey_paper_entry(root: Path, query: str) -> dict:
+    pdf_path, item = resolve_pdf(root, query)
+    if item is None:
+        for candidate in read_index(root):
+            candidate_path = candidate.get("path")
+            if candidate_path and (root / str(candidate_path)).resolve() == pdf_path:
+                item = candidate
+                break
+    title = str(item.get("title")) if item and item.get("title") else pdf_path.stem
+    sources = item.get("sources", []) if item else []
+    return {
+        "entity_id": str(item.get("entity_id") if item else entity_id(title)),
+        "title": title,
+        "path": relative_locator(root, pdf_path),
+        "sources": sources,
+        "status": "available" if pdf_path.exists() else "missing",
+    }
+
+
+def survey_document_entry(record: dict, source: dict) -> dict:
+    return {
+        "entity_id": str(record.get("id", "")),
+        "title": str(record.get("title", "Untitled Survey Source")),
+        "source": source,
+    }
+
+
+def unique_survey_papers(entries: list[dict]) -> list[dict]:
+    unique: list[dict] = []
+    seen = set()
+    for entry in entries:
+        key = str(entry.get("entity_id") or entry.get("path"))
+        if key in seen:
+            continue
+        unique.append(entry)
+        seen.add(key)
+    return unique
+
+
+def local_link_from(path: Path, root: Path, locator: str, source_type: str) -> str:
+    local_path = local_source_path(root, locator, source_type)
+    if local_path is None:
+        return locator
+    try:
+        return os.path.relpath(local_path, start=path.parent)
+    except ValueError:
+        return str(local_path)
+
+
+def markdown_label(value: str) -> str:
+    return value.replace("[", "\\[").replace("]", "\\]")
+
+
+def render_survey_reading_pack(root: Path, manifest_path: Path, manifest: dict) -> str:
+    lines = [f"# {manifest['title']}", "", f"Scope: {manifest['scope']}", "", "## Selected Papers", ""]
+    for paper in manifest["papers"]:
+        title = markdown_label(str(paper.get("title", "Untitled Paper")))
+        link = local_link_from(manifest_path, root, str(paper.get("path", "")), "pdf")
+        lines.append(f"- [{title}]({link})")
+    if manifest["source_documents"]:
+        lines.extend(["", "## Read-only Source Documents", ""])
+        for document in manifest["source_documents"]:
+            source = document.get("source", {})
+            source_type = str(source.get("type", "path"))
+            locator = str(source.get("locator", ""))
+            title = markdown_label(str(document.get("title", "Untitled Source")))
+            link = local_link_from(manifest_path, root, locator, source_type)
+            lines.append(f"- [{title}]({link})")
+    lines.extend(
+        [
+            "",
+            "This generated pack defines scope and sources. It is not survey prose; source documents remain read-only unless the user explicitly requests a rewrite.",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def write_survey_manifest(root: Path, directory: Path, manifest: dict) -> dict:
+    directory.mkdir(parents=True, exist_ok=True)
+    manifest_path = directory / SURVEY_MANIFEST
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    pack_path = directory / SURVEY_READING_PACK
+    pack_path.write_text(render_survey_reading_pack(root, manifest_path, manifest), encoding="utf-8")
+    return {
+        "manifest": str(manifest_path.relative_to(root)),
+        "reading_pack": str(pack_path.relative_to(root)),
+        "papers": len(manifest["papers"]),
+        "source_documents": len(manifest["source_documents"]),
+    }
+
+
+def refresh_survey_paper(root: Path, previous: dict) -> dict:
+    queries = [str(previous.get("title", "")), str(previous.get("entity_id", "")), str(previous.get("path", ""))]
+    for query in queries:
+        if not query:
+            continue
+        try:
+            return survey_paper_entry(root, query)
+        except WorkflowError:
+            continue
+    refreshed = dict(previous)
+    refreshed["status"] = "missing"
+    return refreshed
+
+
+def refresh_survey_document(root: Path, previous: dict, records: list[dict]) -> dict:
+    record = next((item for item in records if str(item.get("id", "")) == str(previous.get("entity_id", ""))), None)
+    source = dict(previous.get("source", {}))
+    if record is not None:
+        for candidate in record.get("sources", []):
+            if isinstance(candidate, dict) and str(candidate.get("type", "")).lower() in LOCAL_SOURCE_TYPES and candidate.get("type") != "pdf":
+                source = dict(candidate)
+                break
+    source_type = str(source.get("type", "path"))
+    locator = str(source.get("locator", ""))
+    path = local_source_path(root, locator, source_type)
+    if path is not None:
+        source["status"] = "available" if path.exists() else "missing"
+    return {
+        "entity_id": str(record.get("id")) if record is not None else str(previous.get("entity_id", "")),
+        "title": str(record.get("title")) if record is not None else str(previous.get("title", "Untitled Survey Source")),
+        "source": source,
+    }
+
+
+def create_or_update_survey(root: Path, title: str, scope: str, papers: list[str], sources: list[str], update: bool) -> dict:
+    slug = survey_slug(title)
+    directory = root / SURVEYS_DIR / slug
+    manifest_path = directory / SURVEY_MANIFEST
+    existing = load_survey_manifest(manifest_path) if manifest_path.exists() else None
+    if existing is None and directory.exists():
+        raise WorkflowError("survey_path_conflict", f"survey directory already exists without a manifest: {directory.relative_to(root)}")
+    if existing is not None and not update:
+        raise WorkflowError("survey_exists", f"survey already exists: {directory.relative_to(root)}; use --update to replace its scope list")
+    if not papers:
+        raise WorkflowError("empty_survey_papers", "a survey scope needs at least one --paper")
+
+    paper_entries = unique_survey_papers([survey_paper_entry(root, query) for query in papers])
+    document_entries = []
+    for source_path in sources:
+        path = resolve_local_document(root, source_path)
+        record, source = ensure_survey_document_entity(root, path)
+        document_entries.append(survey_document_entry(record, source))
+
+    now = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    manifest = {
+        "version": 1,
+        "kind": "literature_survey",
+        "slug": slug,
+        "title": title.strip(),
+        "scope": scope.strip(),
+        "papers": paper_entries,
+        "source_documents": document_entries,
+        "created_at": existing.get("created_at", now) if existing else now,
+        "updated_at": now,
+    }
+    payload = write_survey_manifest(root, directory, manifest)
+    payload["index_entries"] = len(write_index(root))
+    return payload
+
+
+def refresh_survey(root: Path, query: str) -> dict:
+    manifest_path = resolve_survey_manifest(root, query)
+    manifest = load_survey_manifest(manifest_path)
+    records = load_source_records(root)
+    manifest["papers"] = [refresh_survey_paper(root, item) for item in manifest["papers"]]
+    manifest["source_documents"] = [refresh_survey_document(root, item, records) for item in manifest["source_documents"]]
+    manifest["updated_at"] = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    payload = write_survey_manifest(root, manifest_path.parent, manifest)
+    payload["missing_papers"] = sum(1 for item in manifest["papers"] if item.get("status") != "available")
+    payload["missing_source_documents"] = sum(
+        1 for item in manifest["source_documents"] if item.get("source", {}).get("status") == "missing"
+    )
+    return payload
 
 
 def clean_text(text: str) -> str:
@@ -1356,6 +1739,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         "bib_exists": (args.root / "references/references.bib").exists(),
         "source_registry_exists": source_path.exists(),
         "source_registry_records": len(load_source_records(args.root)) if source_path.exists() else 0,
+        "survey_count": len(survey_manifest_paths(args.root)),
     }
     print(json.dumps(status, ensure_ascii=False, indent=2))
     return 0 if any(text_extractors.values()) else 1
@@ -1442,6 +1826,41 @@ def cmd_source_show(args: argparse.Namespace) -> int:
     if not matches:
         raise WorkflowError("no_match", f"no entity match: {args.query}")
     print(json.dumps(matches, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_survey_init(args: argparse.Namespace) -> int:
+    payload = create_or_update_survey(args.root, args.title, args.scope, args.paper, args.source, args.update)
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_survey_refresh(args: argparse.Namespace) -> int:
+    payload = refresh_survey(args.root, args.query)
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_survey_show(args: argparse.Namespace) -> int:
+    manifest_path = resolve_survey_manifest(args.root, args.query)
+    print(json.dumps(load_survey_manifest(manifest_path), ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_survey_source_add(args: argparse.Namespace) -> int:
+    path = resolve_local_document(args.root, args.path)
+    if args.move:
+        path = move_survey_source_document(args.root, path)
+    record, source = ensure_survey_document_entity(args.root, path, args.title)
+    payload = {
+        "entity_id": record["id"],
+        "title": record["title"],
+        "source": source,
+        "path": relative_locator(args.root, path),
+        "moved": bool(args.move),
+    }
+    payload["index_entries"] = len(write_index(args.root))
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
     return 0
 
 
@@ -1543,6 +1962,33 @@ def main() -> int:
     source_show.add_argument("query")
     source_show.add_argument("--limit", type=int, default=5)
     source_show.set_defaults(func=cmd_source_show)
+
+    survey = sub.add_parser("survey", help="create and maintain a scoped literature-survey work pack")
+    survey_sub = survey.add_subparsers(dest="survey_cmd", required=True)
+
+    survey_init = survey_sub.add_parser("init", help="create a survey scope from selected papers and read-only source documents")
+    survey_init.add_argument("--title", required=True)
+    survey_init.add_argument("--scope", required=True, help="user-defined question, boundary, or intended narrative")
+    survey_init.add_argument("--paper", action="append", default=[], help="selected local paper title, alias, or path; repeatable")
+    survey_init.add_argument("--source", action="append", default=[], help="read-only local survey/source document; repeatable")
+    survey_init.add_argument("--update", action="store_true", help="replace an existing generated survey scope list")
+    survey_init.set_defaults(func=cmd_survey_init)
+
+    survey_refresh = survey_sub.add_parser("refresh", help="refresh paths and availability in a generated survey scope")
+    survey_refresh.add_argument("query", help="survey title or directory name")
+    survey_refresh.set_defaults(func=cmd_survey_refresh)
+
+    survey_show = survey_sub.add_parser("show", help="show a generated survey scope manifest")
+    survey_show.add_argument("query", help="survey title or directory name")
+    survey_show.set_defaults(func=cmd_survey_show)
+
+    survey_source = survey_sub.add_parser("source", help="register a read-only survey source document")
+    survey_source_sub = survey_source.add_subparsers(dest="survey_source_cmd", required=True)
+    survey_source_add = survey_source_sub.add_parser("add", help="register a source document and optionally move it into surveys/sources")
+    survey_source_add.add_argument("path")
+    survey_source_add.add_argument("--title", help="optional display title; source bytes are never changed")
+    survey_source_add.add_argument("--move", action="store_true", help="move an in-workspace source into surveys/sources without editing it")
+    survey_source_add.set_defaults(func=cmd_survey_source_add)
 
     args = parser.parse_args()
     args.root = args.root.resolve()

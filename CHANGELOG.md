@@ -4,6 +4,13 @@
 
 ## 2026-07-14
 
+### Survey and Feishu/Lark workflow
+
+- Added scoped survey work packs: selected local papers, optional read-only source drafts, a manifest, and a reading pack under `surveys/`.
+- Added safe management of existing survey drafts: they can be registered or explicitly moved without changing their bytes; generated manifests refresh after paper paths change.
+- Extended the skill from paper reading to survey synthesis and optional Feishu/Lark handoff through the official `lark-cli`.
+- Added guardrails for cloud work: install and authorize only when requested, require an exact destination, preview where supported, and never perform destructive or permission-changing actions by default.
+
 ### Reliable paper organization
 
 - Added opt-in PDF organization: detect titles, normalize filenames, assign one category, and preserve duplicate files.

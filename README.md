@@ -2,7 +2,7 @@
 
 [中文](README.zh-CN.md) | [Changelog](CHANGELOG.md)
 
-Use this Codex skill beside your usual PDF reader. Keep reading in Zotero, Office, Preview, or a browser; Codex finds the local PDF behind a copied title, explains the paper with you, tracks related sources, and writes concise HTML notes from your discussion.
+Use this Codex skill beside your usual PDF reader. Keep reading in Zotero, Office, Preview, or a browser; Codex finds the local PDF behind a copied title, explains the paper with you, tracks related sources, writes concise HTML notes, helps you build a scoped survey, and can deposit selected work in Feishu/Lark.
 
 Built and maintained with Codex.
 
@@ -56,6 +56,18 @@ Generate a concise HTML note for this paper.
 
 The HTML note reflects the paper and your discussion. Later questions that change the interpretation should update the same note; supported local renderers can add native PDF screenshots.
 
+## Build a Survey
+
+Choose the papers and tell Codex the question and boundary in ordinary language:
+
+```text
+Use $literature-workflow. Build a survey scope on execution-feedback training for Text-to-SQL.
+Use ExCoT, SQL-Trail, and MTSQL-R1 as the core papers.
+Treat my existing integrated_survey.md as read-only source material.
+```
+
+Codex creates a small, traceable work pack under `surveys/<topic>/`: a source manifest and a reading pack. It can register your existing survey draft, or move it into `surveys/sources/` when you ask, without changing its contents. Then ask Codex to compare papers, shape the narrative, identify gaps, or write/update survey prose in your chosen style.
+
 ## Automatic Rename and Filing
 
 Automatic filing is opt-in: enable it while setting up the workspace, or ask Codex to organize the new PDFs.
@@ -70,6 +82,16 @@ When enabled, the workflow:
 
 The starter categories are deliberately general. Tell Codex how you want your library grouped, and it will adapt `references/organization_rules.json` and your workspace-local `AGENTS.md`. Ambiguous papers stay in the fallback category. The workflow never deletes PDFs.
 
+## Deposit Work in Feishu/Lark
+
+When a note, survey artifact, or sharing path is ready, give Codex the exact Drive-folder or Wiki link and say what to publish:
+
+```text
+Use $literature-workflow to publish recommended_readings.md to this Feishu folder: <link>.
+```
+
+Codex checks for the official `lark-cli`, installs it if needed, guides the one-time authorization, previews the write when supported, and then creates the requested cloud artifact. It will not sync, overwrite, move, delete, or change sharing permissions unless you explicitly ask.
+
 ## What Codex Maintains
 
 ```text
@@ -78,6 +100,7 @@ your-workspace/
 ├── notes/                  # HTML notes
 │   └── assets/             # native PDF screenshots
 ├── references/             # search index, source registry, filing rules
+├── surveys/                # scoped survey manifests, packs, and managed source drafts
 └── AGENTS.md               # your durable reading preferences
 ```
 

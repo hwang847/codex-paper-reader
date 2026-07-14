@@ -1,6 +1,6 @@
 ---
 name: literature-workflow
-description: "Use for local literature folders: add/import PDFs, refresh/search indexes, map copied titles to local files, manage multiple sources per paper or technical document, prepare reading packs, render PDF screenshots, and create/update concise HTML notes."
+description: "Use for local literature workspaces: organize and read papers, map copied titles to local PDFs, manage paper and survey sources, prepare scoped survey work packs, create concise HTML notes, and hand off selected research artifacts to Feishu/Lark."
 ---
 
 # Literature Workflow
@@ -27,6 +27,9 @@ python3 <skill-dir>/scripts/paper_workflow.py --root "$PWD" find "<title|alias|a
 python3 <skill-dir>/scripts/paper_workflow.py --root "$PWD" readpack "<title|alias|path>"
 python3 <skill-dir>/scripts/paper_workflow.py --root "$PWD" render-page "<title|alias|path>" --page <n> --output <png> --dpi auto
 python3 <skill-dir>/scripts/paper_workflow.py --root "$PWD" note-name "<paper title>"
+python3 <skill-dir>/scripts/paper_workflow.py --root "$PWD" survey init --title "<survey title>" --scope "<question and boundary>" --paper "<paper>" --paper "<paper>"
+python3 <skill-dir>/scripts/paper_workflow.py --root "$PWD" survey refresh "<survey title>"
+python3 <skill-dir>/scripts/paper_workflow.py --root "$PWD" survey source add <draft.md> --move
 ```
 
 Source registry:
@@ -61,13 +64,14 @@ Use `organize --apply` when the workspace policy enables automatic filing or the
 - New PDFs can be dropped in the root folder as inbox items.
 - Organized PDFs live under `papers/<category>/`; PDFs dropped at the workspace root are inbox items.
 - HTML notes go under `notes/`; screenshots go under `notes/assets/`.
+- Survey manifests and reading packs go under `surveys/<scope>/`; managed source drafts can live in `surveys/sources/`.
 - Search index: `references/paper_index.jsonl`.
 - Source registry: `references/source_registry.jsonl`.
 - Do not apply organization or delete files unless the workspace policy or the user explicitly authorizes it. A dry-run organization plan is always available.
 
 ## Source Model
 
-Read targets are entities: `paper`, `tech_doc`, `repo`, `spec`, `dataset`, `slides`, or `unknown`.
+Read targets are entities: `paper`, `survey`, `tech_doc`, `repo`, `spec`, `dataset`, `slides`, or `unknown`.
 
 Sources point to entities: PDF, arXiv, DOI, URL, GitHub repo, local document, project page, slides, etc. One entity may have many sources. Use the source registry when:
 
@@ -77,6 +81,30 @@ Sources point to entities: PDF, arXiv, DOI, URL, GitHub repo, local document, pr
 - a project page, repo, or DOI should be associated with an existing PDF.
 
 If a matched entity has no local PDF, explain that and use available local/web source only if permitted by the user and environment.
+
+## Survey Pipeline
+
+Use `survey` when the user wants to write, map, compare, or maintain a literature review based on several selected papers.
+
+1. Establish the question, boundary, intended audience, and selected papers; ask at most one focused question when needed.
+2. Run `survey init` with the exact scope and each selected paper. Add an existing survey draft with `--source`; it is registered as read-only.
+3. Use the generated `manifest.json` and `reading_pack.md` to read the scoped papers and trace claims back to local sources. Do the synthesis in the user's requested style; do not emit a generic survey template.
+4. Existing source drafts may be moved with `survey source add <path> --move`, but their bytes must never be rewritten. Generated scope files are the only survey files the script changes.
+5. Run `survey refresh` after paper or source paths change. It preserves the scope while reporting unavailable sources.
+
+Read `references/survey_workflow.md` before designing a nontrivial survey, comparison table, or survey update.
+
+## Feishu/Lark Handoff
+
+Use this only when the user explicitly asks to deposit, publish, sync, or manage research artifacts in Feishu/Lark.
+
+1. Check `lark-cli`. If it is missing, install the official CLI with `npx @larksuite/cli@latest install`; do not ask the user to install it manually.
+2. Before any Lark command, read the version-matched official `lark-cli skills read lark-shared` and the relevant `lark-doc`, `lark-drive`, `lark-markdown`, or `lark-wiki` guide.
+3. Help configure and authenticate only when required. Never expose secrets, preserve opaque authorization URLs exactly, and use the official device flow.
+4. Require a concrete Drive folder URL/token or Wiki URL/token and explicit publication intent before writing. Preview with `--dry-run` where available; do not overwrite, move, sync, delete, or change permissions without a separate confirmation.
+5. Prefer native Markdown for Markdown research artifacts, Drive upload for attachments/PDFs, and Docs only when the user requests a cloud document.
+
+Read `references/lark_handoff.md` before a Feishu/Lark action.
 
 ## Reading Pipeline
 

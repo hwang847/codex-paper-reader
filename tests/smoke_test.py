@@ -165,6 +165,57 @@ Results follow.
         note_name = run("--root", str(workspace), "note-name", "LinkAlign: Example Paper").stdout.strip()
         assert note_name == "linkalign.html"
 
+        survey_source = workspace / "integrated_survey.md"
+        survey_source_bytes = b"# Existing Survey\n\nThis source draft must stay byte-for-byte unchanged.\n"
+        survey_source.write_bytes(survey_source_bytes)
+        moved_source = json.loads(
+            run(
+                "--root",
+                str(workspace),
+                "survey",
+                "source",
+                "add",
+                "integrated_survey.md",
+                "--move",
+            ).stdout
+        )
+        assert moved_source["moved"] is True
+        assert (workspace / moved_source["path"]).read_bytes() == survey_source_bytes
+        assert not survey_source.exists()
+        non_pdf_read = subprocess.run(
+            [sys.executable, "-B", str(TOOL), "--root", str(workspace), "readpack", moved_source["title"]],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        assert non_pdf_read.returncode == 2
+        assert "no_pdf_source" in non_pdf_read.stderr
+
+        scoped = json.loads(
+            run(
+                "--root",
+                str(workspace),
+                "survey",
+                "init",
+                "--title",
+                "Example Survey",
+                "--scope",
+                "Compare local paper retrieval and source management.",
+                "--paper",
+                "HFT",
+                "--source",
+                moved_source["path"],
+            ).stdout
+        )
+        assert (workspace / scoped["manifest"]).is_file()
+        assert (workspace / scoped["reading_pack"]).is_file()
+        manifest = json.loads((workspace / scoped["manifest"]).read_text(encoding="utf-8"))
+        assert manifest["papers"][0]["title"] == "Human Friendly Title"
+        assert manifest["source_documents"][0]["source"]["status"] == "available"
+        refreshed_survey = json.loads(run("--root", str(workspace), "survey", "refresh", "Example Survey").stdout)
+        assert refreshed_survey["missing_papers"] == 0
+        assert (workspace / moved_source["path"]).read_bytes() == survey_source_bytes
+
         organized = Path(tmp) / "organized"
         organized.mkdir()
         run("--root", str(organized), "setup")
@@ -210,6 +261,26 @@ Results follow.
             + "\n",
             encoding="utf-8",
         )
+        source_draft = organized / "draft.md"
+        source_draft_bytes = b"# Existing Draft\n\nKeep the literal path download.pdf unchanged.\n"
+        source_draft.write_bytes(source_draft_bytes)
+        run("--root", str(organized), "survey", "source", "add", "draft.md")
+        organization_scope = json.loads(
+            run(
+                "--root",
+                str(organized),
+                "survey",
+                "init",
+                "--title",
+                "Organization Survey",
+                "--scope",
+                "Check path migration without rewriting source prose.",
+                "--paper",
+                "Example Text-to-SQL Paper",
+                "--source",
+                "draft.md",
+            ).stdout
+        )
         organized_plan = json.loads(run("--root", str(organized), "organize").stdout)
         assert organized_plan["plan"][0]["target"] == "papers/core/example_text_to_sql_paper.pdf"
         run("--root", str(organized), "organize", "--apply")
@@ -218,12 +289,22 @@ Results follow.
         bib = (organized / "references" / "references.bib").read_text(encoding="utf-8")
         assert "% Source: example_text_to_sql_paper.pdf" in bib
         assert "note = {download.pdf must not be globally rewritten}" in bib
-        source_record = json.loads((organized / "references" / "source_registry.jsonl").read_text(encoding="utf-8"))
+        source_records = [
+            json.loads(line)
+            for line in (organized / "references" / "source_registry.jsonl").read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        source_record = next(record for record in source_records if record["title"] == "Example Text-to-SQL Paper")
         assert source_record["sources"][0]["locator"] == "papers/core/example_text_to_sql_paper.pdf"
         assert json.loads(run("--root", str(organized), "find", "Example Text-to-SQL Paper", "--json").stdout)[0]["path"] == "papers/core/example_text_to_sql_paper.pdf"
         resolved, resolved_item = resolve_pdf(organized, "Example Text-to-SQL Paper")
         assert resolved == (organized / "papers/core/example_text_to_sql_paper.pdf").resolve()
         assert resolved_item and resolved_item["title"] == "Example Text-to-SQL Paper"
+        assert source_draft.read_bytes() == source_draft_bytes
+        organization_manifest = (organized / organization_scope["manifest"]).read_text(encoding="utf-8")
+        organization_pack = (organized / organization_scope["reading_pack"]).read_text(encoding="utf-8")
+        assert "papers/core/example_text_to_sql_paper.pdf" in organization_manifest
+        assert "papers/core/example_text_to_sql_paper.pdf" in organization_pack
 
         invalid_rules = Path(tmp) / "invalid_rules.json"
         invalid_rules.write_text(

@@ -2,7 +2,7 @@
 
 [English](README.md) | [更新说明](CHANGELOG.zh-CN.md)
 
-这是一个配合 PDF 阅读器使用的 Codex skill。你继续在 Zotero、Office、Preview 或浏览器中阅读 PDF；Codex 负责从复制的标题定位本地文件、陪你解读论文、管理相关 source，并把讨论沉淀成简洁的 HTML 笔记。
+这是一个配合 PDF 阅读器使用的 Codex skill。你继续在 Zotero、Office、Preview 或浏览器中阅读 PDF；Codex 负责从复制的标题定位本地文件、陪你解读论文、管理相关 source、整理综述范围，并把讨论沉淀成简洁的 HTML 笔记或飞书内容。
 
 本仓库使用 Codex 开发并维护。
 
@@ -56,6 +56,18 @@ Codex 会按需刷新索引，找到对应的本地 PDF，先从摘要开始，�
 
 HTML 笔记会结合论文和你们的讨论生成。后续提问改变了对论文的理解时，Codex 应更新同一份笔记；本地支持渲染时，也可以放入原生 PDF 截图。
 
+## 写综述
+
+选定文献后，用自然语言说明问题和边界：
+
+```text
+使用 $literature-workflow，围绕 Text-to-SQL 的 execution-feedback training 建立综述范围。
+核心论文是 ExCoT、SQL-Trail 和 MTSQL-R1。
+把我已有的 integrated_survey.md 作为只读来源。
+```
+
+Codex 会在 `surveys/<topic>/` 创建可追溯的范围清单和阅读包。已有综述可以登记为 source；你要求时也可以移动到 `surveys/sources/` 统一管理，但内容不会被改写。之后继续让 Codex 比较文献、梳理叙事、定位空白，或按你的风格生成/更新综述正文即可。
+
 ## 自动重命名与归档
 
 自动归档是可选的：配置工作区时启用，或者直接让 Codex 整理新 PDF。
@@ -70,6 +82,16 @@ HTML 笔记会结合论文和你们的讨论生成。后续提问改变了对论
 
 初始分类是通用的。你只需告诉 Codex 想怎样分组，它会调整 `references/organization_rules.json` 和本地 `AGENTS.md`。无法可靠判断的论文会留在兜底分类；工作流不会删除 PDF。
 
+## 沉淀到飞书
+
+当笔记、综述材料或分享路径准备好后，提供确切的云盘文件夹或知识库链接，并说明要发布什么：
+
+```text
+使用 $literature-workflow，把 recommended_readings.md 发布到这个飞书文件夹：<链接>。
+```
+
+Codex 会检查飞书官方 `lark-cli`；缺失时会协助安装，随后引导一次授权、在支持时先预览，再创建你指定的云端内容。除非你明确提出，它不会同步目录、覆盖/移动/删除云端文件，也不会改动分享权限。
+
 ## Codex 维护的内容
 
 ```text
@@ -78,6 +100,7 @@ your-workspace/
 ├── notes/                  # HTML 笔记
 │   └── assets/             # 原生 PDF 截图
 ├── references/             # 索引、source registry、归档规则
+├── surveys/                # 综述范围清单、阅读包、受管理的原始综述
 └── AGENTS.md               # 你的稳定阅读偏好
 ```
 
