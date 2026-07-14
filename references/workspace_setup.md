@@ -6,11 +6,11 @@ Use this reference only when the user asks to set up, initialize, or configure a
 
 Let scripts handle mechanical setup. Let Codex handle personalization.
 
-Run `scripts/paper_workflow.py --root <workspace> setup` to create the standard folders, source registry, and index. Run `doctor` after that. Then create, update, and maintain the workspace's local `AGENTS.md` from the user's intent.
+Run `scripts/paper_workflow.py --root <workspace> setup` to create the standard folders, organization rules, source registry, and index. Run `doctor` after that. Then create, update, and maintain the workspace's local `AGENTS.md` from the user's intent.
 
 This open-source skill provides base mechanics and a starting workflow. The user's own `AGENTS.md` is the evolving local workflow.
 
-Keep scripts for capabilities that are useful because they are deterministic, repetitive, or fragile when done manually: indexing, title-to-PDF lookup, source registry updates, PDF rendering, note filenames, and environment checks. Do not turn ordinary file organization into skill logic; Codex can handle moving, renaming, or classifying files directly when the user asks.
+Keep scripts for capabilities that are deterministic, repetitive, or fragile when done manually: indexing, title-to-PDF lookup, source registry updates, PDF rendering, note filenames, environment checks, and policy-controlled organization. The scripts make filing collision-safe and keep references synchronized; Codex decides the user's taxonomy and when that policy should apply.
 
 Do not treat `templates/AGENTS.example.md` as a fixed file to copy. It is only a shape reference.
 

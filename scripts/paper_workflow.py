@@ -10,12 +10,13 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import unicodedata
 from pathlib import Path
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
-from build_paper_index import build_index
+from build_paper_index import build_index, extract_pdf_title
 from find_paper import index_is_stale, score
 
 
@@ -27,6 +28,86 @@ SOURCE_REGISTRY = Path("references/source_registry.jsonl")
 SOURCE_KINDS = {"paper", "tech_doc", "spec", "blog", "repo", "dataset", "slides", "unknown"}
 LOCAL_SOURCE_TYPES = {"pdf", "doc", "html", "text", "path"}
 WORKSPACE_DIRS = ("papers", "notes", "notes/assets", "references")
+ORGANIZATION_RULES = Path("references/organization_rules.json")
+
+DEFAULT_ORGANIZATION_RULES = {
+    "version": 1,
+    "default_category": "uncategorized",
+    "categories": [
+        {"name": "surveys", "keywords": ["survey", "overview", "landscape", "selective overview"]},
+        {
+            "name": "methods",
+            "keywords": [
+                "method",
+                "approach",
+                "framework",
+                "algorithm",
+                "reasoning",
+                "planning",
+            ],
+        },
+        {
+            "name": "agents-and-tools",
+            "keywords": [
+                "agent",
+                "agentic",
+                "multi-agent",
+                "tool use",
+                "tool calling",
+                "workflow",
+            ],
+        },
+        {
+            "name": "training-and-alignment",
+            "keywords": [
+                "reinforcement learning",
+                "fine-tuning",
+                "fine tuning",
+                "preference optimization",
+                "reward",
+                "alignment",
+            ],
+        },
+        {
+            "name": "retrieval-and-data",
+            "keywords": [
+                "retrieval",
+                "retrieval-augmented",
+                "rag",
+                "knowledge graph",
+                "database",
+                "data management",
+                "vector search",
+            ],
+        },
+        {
+            "name": "systems-and-infrastructure",
+            "keywords": [
+                "system",
+                "serving",
+                "distributed",
+                "long context",
+                "memory",
+                "vector database",
+                "infrastructure",
+            ],
+        },
+        {
+            "name": "benchmarks-and-evaluation",
+            "keywords": [
+                "benchmark",
+                "dataset",
+                "evaluation",
+                "leaderboard",
+                "challenge",
+                "shared task",
+            ],
+        },
+        {"name": "uncategorized", "keywords": []},
+    ],
+    "title_overrides": {},
+    "category_overrides": {},
+}
 
 
 class WorkflowError(Exception):
@@ -70,6 +151,19 @@ def write_index(root: Path) -> list[dict]:
         index = build_index(root, root / "references/references.bib")
     except ValueError as exc:
         raise WorkflowError("index_build_failed", str(exc)) from exc
+    rules = load_organization_rules(root)
+    for item in index:
+        path = str(item.get("path", ""))
+        for key in (path, Path(path).name, str(item.get("title", ""))):
+            override = rule_override(rules, key)
+            if not override:
+                continue
+            original = str(item.get("title", ""))
+            item["title"] = clean_organization_title(override)
+            item["aliases"] = sorted({*item.get("aliases", []), original, item["title"]})
+            item["normalized_aliases"] = [normalize(alias) for alias in item["aliases"]]
+            item["title_source"] = "organization_rules"
+            break
     output = root / "references/paper_index.jsonl"
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(
@@ -112,6 +206,18 @@ def resolve_pdf(root: Path, query: str) -> tuple[Path, dict | None]:
     path = root / query
     if path.exists():
         return path.resolve(), None
+    normalized_query = normalize(query)
+    if normalized_query:
+        exact = []
+        for item in read_index(root):
+            aliases = [str(item.get("title", "")), str(item.get("entity_id", ""))]
+            aliases.extend(str(alias) for alias in item.get("aliases", []) if alias)
+            if normalized_query in {normalize(alias) for alias in aliases if alias}:
+                exact.append(item)
+        if len(exact) == 1 and exact[0].get("path"):
+            return (root / str(exact[0]["path"])).resolve(), exact[0]
+        if len(exact) > 1:
+            raise WorkflowError("ambiguous_match", "paper query is ambiguous", exact)
     matches = find_matches(root, query, 5)
     if not matches:
         raise WorkflowError("no_match", f"no paper match: {query}")
@@ -156,6 +262,287 @@ def unique_path(path: Path) -> Path:
         if not candidate.exists():
             return candidate
     raise WorkflowError("name_collision", f"too many existing files named like {path.name}")
+
+
+def load_organization_rules(root: Path, rules: str | None = None) -> dict:
+    path = root / (rules or ORGANIZATION_RULES)
+    if not path.exists():
+        return json.loads(json.dumps(DEFAULT_ORGANIZATION_RULES))
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise WorkflowError("invalid_organization_rules", f"invalid organization rules: {path}", str(exc)) from exc
+    if not isinstance(payload, dict) or not isinstance(payload.get("categories"), list):
+        raise WorkflowError("invalid_organization_rules", "organization rules need a categories list")
+    categories = []
+    for item in payload["categories"]:
+        if not isinstance(item, dict) or not str(item.get("name", "")).strip():
+            raise WorkflowError("invalid_organization_rules", "every category needs a non-empty name")
+        name = str(item["name"]).strip()
+        if name in {".", ".."} or Path(name).name != name:
+            raise WorkflowError("invalid_organization_rules", f"category name must be one directory name: {name}")
+        keywords = item.get("keywords", [])
+        if not isinstance(keywords, list) or not all(isinstance(value, str) for value in keywords):
+            raise WorkflowError("invalid_organization_rules", f"invalid keywords for category {item['name']}")
+        categories.append({"name": name, "keywords": keywords})
+    payload["categories"] = categories
+    payload.setdefault("default_category", "uncategorized")
+    payload.setdefault("title_overrides", {})
+    payload.setdefault("category_overrides", {})
+    return payload
+
+
+def organization_key(value: str) -> str:
+    return str(value).replace("\\", "/").strip().lower()
+
+
+def rule_override(rules: dict, key: str) -> str | None:
+    overrides = rules.get("title_overrides", {})
+    if not isinstance(overrides, dict):
+        return None
+    normalized = organization_key(key)
+    for candidate, value in overrides.items():
+        if organization_key(str(candidate)) == normalized and str(value).strip():
+            return str(value).strip()
+    return None
+
+
+def category_override(rules: dict, item: dict, rel_path: str, title: str) -> str | None:
+    overrides = rules.get("category_overrides", {})
+    if not isinstance(overrides, dict):
+        return None
+    candidates = [rel_path, Path(rel_path).name, title, str(item.get("entity_id", ""))]
+    for candidate in candidates:
+        candidate_key = organization_key(candidate)
+        candidate_slug = normalize(candidate)
+        for key, value in overrides.items():
+            if organization_key(str(key)) in {candidate_key, candidate_slug} and isinstance(value, str) and value.strip():
+                return value.strip()
+    return None
+
+
+def clean_organization_title(title: str) -> str:
+    value = clean_text(str(title))
+    value = re.sub(r"\s+[†‡*]+\s*", " ", value)
+    value = re.sub(r"\s+\d+(?=\s|$)", " ", value)
+    return clean_text(value).strip(" ._")
+
+
+def paper_filename(title: str, fallback: str) -> str:
+    value = normalize(clean_organization_title(title))
+    if not value:
+        value = normalize(Path(fallback).stem)
+    if not value:
+        value = "paper"
+    return f"{value[:180].rstrip('_')}.pdf"
+
+
+def keyword_matches(text: str, keyword: str) -> int:
+    phrase = normalize(keyword).replace("_", " ").strip()
+    if not phrase:
+        return 0
+    normalized = normalize(text).replace("_", " ")
+    if " " in phrase:
+        return int(phrase in normalized)
+    return int(bool(re.search(rf"\b{re.escape(phrase)}\b", normalized)))
+
+
+def classify_paper(item: dict, title: str, rules: dict, rel_path: str) -> tuple[str, list[str]]:
+    override = category_override(rules, item, rel_path, title)
+    category_names = {str(entry["name"]) for entry in rules["categories"]}
+    if override:
+        if override not in category_names:
+            raise WorkflowError("invalid_organization_rules", f"unknown category override: {override}")
+        return override, ["override"]
+
+    evidence = f"{title} {item.get('aliases', [])}"
+    scored: list[tuple[int, int, str, list[str]]] = []
+    for priority, entry in enumerate(rules["categories"]):
+        name = str(entry["name"])
+        unique_keywords = {normalize(keyword).replace("_", " "): keyword for keyword in entry.get("keywords", [])}
+        matches = [keyword for normalized, keyword in unique_keywords.items() if keyword_matches(evidence, normalized)]
+        if matches:
+            scored.append((len(matches), -priority, name, matches))
+    if not scored:
+        default = str(rules.get("default_category", "uncategorized"))
+        if default not in category_names:
+            raise WorkflowError("invalid_organization_rules", f"unknown default category: {default}")
+        return default, []
+    best = max(scored, key=lambda value: (value[0], value[1]))
+    return best[2], best[3]
+
+
+def effective_organization_title(root: Path, item: dict, pdf_path: Path, rules: dict) -> tuple[str, str]:
+    rel_path = str(pdf_path.relative_to(root))
+    for key in (rel_path, pdf_path.name, str(item.get("title", ""))):
+        override = rule_override(rules, key)
+        if override:
+            return clean_organization_title(override), "override"
+
+    title = clean_organization_title(str(item.get("title", "")))
+    title_source = str(item.get("title_source", ""))
+    if not title or title == pdf_path.stem or title_source == "filename":
+        extracted = extract_pdf_title(pdf_path)
+        if extracted:
+            title = clean_organization_title(extracted)
+            return title, "pdf"
+    return title or pdf_path.stem, str(item.get("title_source", "index"))
+
+
+def organization_items(root: Path, rules: dict) -> list[dict]:
+    index = write_index(root)
+    by_path: dict[str, tuple[str, dict]] = {}
+    for item in index:
+        path = item.get("path")
+        if not path or not str(path).lower().endswith(".pdf"):
+            continue
+        rel_path = str(path)
+        key = organization_key(rel_path)
+        current = by_path.get(key)
+        if current is None or str(item.get("source_type", "")) == "source_registry":
+            by_path[key] = (rel_path, item)
+
+    planned = []
+    source_paths = {(root / rel_path).resolve() for rel_path, _ in by_path.values()}
+    reserved: set[Path] = set()
+    for _, (rel_path, item) in sorted(by_path.items()):
+        source = (root / rel_path).resolve()
+        if not source.exists() or not source.is_file():
+            continue
+        title, title_source = effective_organization_title(root, item, source, rules)
+        category, evidence = classify_paper(item, title, rules, rel_path)
+        target = root / "papers" / category / paper_filename(title, source.name)
+        collision = 1
+        while target.resolve() in reserved or (target.exists() and target.resolve() not in {source} and target.resolve() not in source_paths):
+            collision += 1
+            target = target.with_name(f"{target.stem}_{collision}{target.suffix}")
+        if target.resolve() in source_paths and target.resolve() != source:
+            collision = 2
+            candidate = target.with_name(f"{target.stem}_{collision}{target.suffix}")
+            while candidate.resolve() in reserved or (candidate.exists() and candidate.resolve() not in source_paths):
+                collision += 1
+                candidate = target.with_name(f"{target.stem}_{collision}{target.suffix}")
+            target = candidate
+        reserved.add(target.resolve())
+        planned.append(
+            {
+                "source": str(source.relative_to(root)),
+                "target": str(target.relative_to(root)),
+                "title": title,
+                "title_source": title_source,
+                "category": category,
+                "evidence": evidence,
+                "changed": source != target.resolve(),
+            }
+        )
+    return planned
+
+
+def rewrite_bib_sources(root: Path, mapping: dict[str, str]) -> None:
+    path = root / "references/references.bib"
+    if not path.exists():
+        return
+    by_name = {organization_key(Path(old).name): Path(new).name for old, new in mapping.items()}
+    lines = []
+    for line in path.read_text(encoding="utf-8").splitlines(keepends=True):
+        match = re.match(r"(\s*%\s*Source:\s*)(.+?)(\s*)$", line.rstrip("\n"))
+        if match:
+            source = match.group(2).strip()
+            replacement = mapping.get(source) or mapping.get(organization_key(source))
+            if not replacement and organization_key(Path(source).name) in by_name:
+                replacement = by_name[organization_key(Path(source).name)]
+            if replacement:
+                prefix = match.group(1)
+                if "/" not in source:
+                    replacement = Path(replacement).name
+                line = f"{prefix}{replacement}{match.group(3)}\n"
+        lines.append(line)
+    path.write_text("".join(lines), encoding="utf-8")
+
+
+def rewrite_source_registry(root: Path, mapping: dict[str, str]) -> None:
+    records = load_source_records(root)
+    if not records:
+        return
+    by_name = {organization_key(Path(old).name): new for old, new in mapping.items()}
+    for record in records:
+        for source in record.get("sources", []):
+            if not isinstance(source, dict) or str(source.get("type", "")).lower() not in LOCAL_SOURCE_TYPES:
+                continue
+            locator = str(source.get("locator", ""))
+            replacement = mapping.get(locator) or mapping.get(organization_key(locator)) or by_name.get(organization_key(Path(locator).name))
+            if replacement:
+                source["locator"] = replacement
+                source["status"] = "available"
+    write_source_records(root, records)
+
+
+def rewrite_workspace_references(root: Path, mapping: dict[str, str]) -> None:
+    if not mapping:
+        return
+    replacements = sorted(mapping.items(), key=lambda pair: len(pair[0]), reverse=True)
+    text_suffixes = {".md", ".html", ".json", ".jsonl", ".txt", ".yaml", ".yml"}
+    managed_paths = {
+        root / "references/paper_index.jsonl",
+        root / "references/source_registry.jsonl",
+        root / "references/references.bib",
+    }
+    for path in root.rglob("*"):
+        if not path.is_file() or path.suffix.lower() not in text_suffixes:
+            continue
+        relative = path.relative_to(root)
+        if ".git" in relative.parts or path.is_relative_to(root / "papers") or path in managed_paths:
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+        updated = text
+        for old, new in replacements:
+            updated = re.sub(re.escape(old), new, updated, flags=re.IGNORECASE)
+            updated = re.sub(re.escape(Path(old).name), Path(new).name, updated, flags=re.IGNORECASE)
+        if updated != text:
+            path.write_text(updated, encoding="utf-8")
+
+
+def apply_organization(root: Path, planned: list[dict]) -> dict:
+    active = [item for item in planned if item["changed"]]
+    mapping = {organization_key(item["source"]): item["target"] for item in active}
+    reference_mapping = {item["source"]: item["target"] for item in active}
+    if not active:
+        return {"moved": 0, "mapping": {}, "plan": planned}
+
+    staging = Path(tempfile.mkdtemp(prefix=".literature-workflow-", dir=root))
+    staged: list[tuple[Path, Path, Path]] = []
+    try:
+        for idx, item in enumerate(active):
+            source = root / item["source"]
+            temporary = staging / f"{idx:04d}.pdf"
+            shutil.move(str(source), str(temporary))
+            staged.append((temporary, source, root / item["target"]))
+        for temporary, source, target in staged:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(temporary), str(target))
+    except Exception:
+        for temporary, source, target in reversed(staged):
+            try:
+                if target.exists() and not source.exists():
+                    source.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.move(str(target), str(source))
+                elif temporary.exists() and not source.exists():
+                    source.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.move(str(temporary), str(source))
+            except OSError:
+                pass
+        raise
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+
+    rewrite_bib_sources(root, mapping)
+    rewrite_source_registry(root, mapping)
+    rewrite_workspace_references(root, reference_mapping)
+    index = write_index(root)
+    return {"moved": len(active), "mapping": mapping, "plan": planned, "index_entries": len(index)}
 
 
 def is_pdf(path: Path) -> bool:
@@ -289,6 +676,13 @@ def setup_workspace(root: Path) -> dict:
     else:
         source_path.write_text("", encoding="utf-8")
         created.append(str(SOURCE_REGISTRY))
+
+    rules_path = root / ORGANIZATION_RULES
+    if rules_path.exists():
+        preserved.append(str(ORGANIZATION_RULES))
+    else:
+        rules_path.write_text(json.dumps(DEFAULT_ORGANIZATION_RULES, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        created.append(str(ORGANIZATION_RULES))
 
     index = write_index(root)
     return {
@@ -637,6 +1031,9 @@ def method_like_section(text: str) -> tuple[str, str, str]:
 
 def readpack(root: Path, query: str, max_pages: int) -> dict:
     pdf_path, match = resolve_pdf(root, query)
+    if match is None:
+        relative = str(pdf_path.relative_to(root)) if pdf_path.is_relative_to(root) else ""
+        match = next((item for item in read_index(root) if str(item.get("path", "")) == relative), None)
     pages = extract_pdf_pages(pdf_path, max_pages=max_pages)
     full = "\n".join(pages)
     title = match.get("title") if match else extract_title_from_first_page(pages[0] if pages else "", pdf_path.stem)
@@ -739,6 +1136,38 @@ def render_page_with_pymupdf(pdf_path: Path, output: Path, page: int, dpi: int) 
         raise WorkflowError("pdf_render_failed", f"failed to render page {page} with PyMuPDF", str(exc)) from exc
 
 
+def render_page_with_pdftoppm(pdf_path: Path, output: Path, page: int, dpi: int) -> None:
+    pdftoppm = shutil.which("pdftoppm")
+    if not pdftoppm:
+        raise WorkflowError("pdf_renderer_missing", "Poppler pdftoppm is not available")
+    output_base = output.with_suffix("")
+    command = [
+        pdftoppm,
+        "-f",
+        str(page),
+        "-l",
+        str(page),
+        "-r",
+        str(dpi),
+        "-png",
+        "-singlefile",
+        str(pdf_path),
+        str(output_base),
+    ]
+    result = subprocess.run(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if result.returncode != 0:
+        raise WorkflowError(
+            "pdf_render_failed",
+            f"failed to render page {page} with pdftoppm",
+            {"stdout": result.stdout[-1000:], "stderr": result.stderr[-1000:]},
+        )
+    generated = output_base.with_suffix(".png")
+    if generated != output and generated.exists():
+        generated.replace(output)
+    if not output.exists():
+        raise WorkflowError("pdf_render_failed", f"pdftoppm did not create {output}")
+
+
 def scale_crop(crop: str, scale: float) -> str:
     if scale == 1:
         return crop
@@ -812,10 +1241,13 @@ def render_page(root: Path, query: str, page: int, output: Path | None, dpi: str
     elif status["pymupdf"]:
         renderer = "pymupdf"
         render_page_with_pymupdf(pdf_path, output, page, resolved_dpi)
+    elif status["pdftoppm"]:
+        renderer = "pdftoppm"
+        render_page_with_pdftoppm(pdf_path, output, page, resolved_dpi)
     else:
         raise WorkflowError(
             "pdf_renderer_missing",
-            "no PDF renderer available; install Ghostscript or PyMuPDF, or omit the screenshot",
+            "no PDF renderer available; install Ghostscript, PyMuPDF, or Poppler pdftoppm, or omit the screenshot",
             status,
         )
     if crop:
@@ -858,6 +1290,17 @@ def cmd_add(args: argparse.Namespace) -> int:
     target = add_pdf(args.root, args.source, args.name)
     print(str(target.relative_to(args.root) if target.is_relative_to(args.root) else target))
     write_index(args.root)
+    return 0
+
+
+def cmd_organize(args: argparse.Namespace) -> int:
+    rules = load_organization_rules(args.root, args.rules)
+    planned = organization_items(args.root, rules)
+    if args.apply:
+        payload = apply_organization(args.root, planned)
+    else:
+        payload = {"dry_run": True, "moved": 0, "plan": planned, "index_entries": len(planned)}
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
     return 0
 
 
@@ -1025,6 +1468,14 @@ def main() -> int:
     add.add_argument("source")
     add.add_argument("--name")
     add.set_defaults(func=cmd_add)
+
+    organize = sub.add_parser(
+        "organize",
+        help="rename PDFs from their titles and place them into configured topic folders",
+    )
+    organize.add_argument("--rules", type=Path, help="organization rules JSON, relative to workspace root")
+    organize.add_argument("--apply", action="store_true", help="apply the plan; without it, print a dry-run plan")
+    organize.set_defaults(func=cmd_organize)
 
     pack = sub.add_parser("readpack", help="resolve PDF and extract abstract/method/workflow snippets")
     pack.add_argument("query")

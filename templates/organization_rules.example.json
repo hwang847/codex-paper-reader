@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "default_category": "uncategorized",
+  "categories": [
+    {"name": "surveys", "keywords": ["survey", "overview", "landscape"]},
+    {"name": "methods", "keywords": ["method", "approach", "framework", "reasoning", "planning"]},
+    {"name": "agents-and-tools", "keywords": ["agent", "agentic", "multi-agent", "tool calling", "workflow"]},
+    {"name": "training-and-alignment", "keywords": ["reinforcement learning", "fine-tuning", "preference optimization", "reward"]},
+    {"name": "retrieval-and-data", "keywords": ["retrieval", "rag", "knowledge graph", "database"]},
+    {"name": "systems-and-infrastructure", "keywords": ["system", "serving", "distributed", "memory"]},
+    {"name": "benchmarks-and-evaluation", "keywords": ["benchmark", "dataset", "evaluation", "leaderboard"]},
+    {"name": "uncategorized", "keywords": []}
+  ],
+  "title_overrides": {},
+  "category_overrides": {}
+}

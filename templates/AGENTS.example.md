@@ -7,9 +7,9 @@
 - Use `$literature-workflow` as the executable workflow.
 - Default language is English unless the user asks for another language; record language preference here only when it is stable.
 - Workspace root is the current directory containing this `AGENTS.md`.
-- This is a paper/document library, not an app; do not start servers, build UI, move, rename, or delete files unless explicitly asked.
-- New PDFs belong in the root inbox by default; organized PDFs may live under `papers/`.
-- After new files appear, refresh the index.
+- This is a paper/document library, not an app; do not start servers or build UI. Do not delete files. Apply organization only when the workspace policy or user explicitly permits it.
+- New PDFs belong in the root inbox by default; organized PDFs live under `papers/<category>/`.
+- After new files appear, refresh the index; run `organize --apply` only when automatic filing is enabled.
 - Treat readable objects as entities: `paper`, `tech_doc`, `repo`, `spec`, `dataset`, `slides`, or `unknown`.
 - Treat PDF/arXiv/DOI/URL/GitHub/local docs as sources; use `references/source_registry.jsonl` through the workflow for multi-source entities or non-paper documents.
 - Prefer local evidence. Use web only when asked, approved, or needed to download a requested source.

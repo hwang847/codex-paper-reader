@@ -24,6 +24,7 @@ Codex 可以帮你做到：
 
 - 配置工作区、建立 PDF 索引、记录相关 source。
 - 把复制来的论文标题匹配到本地的 arXiv 编号、会议编号或普通下载文件名。
+- 根据识别到的论文标题重命名 PDF，并按可配置的主题目录归档；同时更新本地引用，保留同名的不同版本。
 - 把复杂文献转写成更适合你阅读偏好的解释。
 - 回答你关于方法、pipeline、实现细节、related work 或综述定位的追问。
 - 根据论文和你们的讨论生成简洁 HTML 笔记；本地支持渲染时，还可以加入论文截图。
@@ -44,7 +45,7 @@ Codex 本身通过对话处理更灵活的部分：
 - 按你的语言和阅读风格解释论文；
 - 调整阅读重点，例如方法 pipeline、实现细节或 related work；
 - 当你的偏好稳定后，更新当前工作区的 `AGENTS.md`；
-- 只有在你明确要求时，才清理、移动、重命名或分类文件。
+- 按工作区规则或你的请求执行归档；当你的分类偏好变化时，Codex 可以继续调整规则。
 
 ## Quickstart
 
@@ -63,7 +64,7 @@ git clone https://github.com/hwang847/codex-paper-reader.git ~/.codex/skills/lit
 使用 $literature-workflow，帮我配置这个论文阅读工作区。
 ```
 
-Codex 会创建目录结构、初始化索引、检查本地能力，并维护一个精简的 `AGENTS.md` 来记录你的偏好。你不需要手动建目录或检查 Python 包。
+Codex 会创建目录结构、初始化索引、检查本地能力，并维护一个精简的 `AGENTS.md` 来记录你的偏好。你不需要手动建目录或检查 Python 包。如果希望新文献自动归档，在配置时直接告诉 Codex；它会使用工作区规则文件，并把不确定的文献留在兜底目录。
 
 然后把 PDF 放进这个文件夹，继续说：
 
@@ -80,7 +81,7 @@ Codex 会创建目录结构、初始化索引、检查本地能力，并维护�
 
 工作区配置好之后：
 
-1. 把新的 PDF 放进工作区根目录或 `papers/`。
+1. 把新的 PDF 放进工作区根目录作为 inbox，也可以直接放进 `papers/`。
 2. 用你的 PDF 阅读器打开论文。
 3. 复制论文标题。
 4. 对 Codex 说：
@@ -90,7 +91,7 @@ Codex 会创建目录结构、初始化索引、检查本地能力，并维护�
 APEX-SQL: Talking to the data via Agentic Exploration for Text-to-SQL
 ```
 
-Codex 会在需要时刷新索引，把复制的论文标题匹配到本地 PDF，准备阅读材料，然后开始交互式阅读。你可以继续追问方法、pipeline、实现细节、related work，或任何你关心的部分。
+Codex 会在需要时刷新索引，按你的工作区偏好重命名和归类新 PDF，把复制的论文标题匹配到本地文件，准备阅读材料，然后开始交互式阅读。你可以继续追问方法、pipeline、实现细节、related work，或任何你关心的部分。
 
 当你觉得已经讨论清楚后，再让 Codex 生成 HTML 笔记。笔记会结合论文内容和你们的讨论，所以它应该更贴近你的关注点，而不是通用摘要。
 
@@ -98,16 +99,16 @@ Codex 会在需要时刷新索引，把复制的论文标题匹配到本地 PDF�
 
 ```text
 your-workspace/
-├── papers/                 # 可选，由你自己整理的 PDF
+├── papers/                 # 已归类 PDF，例如 papers/methods/
 ├── notes/                  # HTML 笔记
 │   └── assets/             # 截图
 ├── references/             # 索引和 source registry
 └── AGENTS.md               # 本地 Codex 偏好
 ```
 
-新 PDF 可以直接放在工作区根目录作为 inbox。已经放在 `papers/` 下的 PDF 也可以直接使用。
+新 PDF 可以直接放在工作区根目录作为 inbox。启用自动归档后，Codex 会将其移动到 `papers/<category>/`，并根据论文标题规范化文件名。规则文件是 `references/organization_rules.json`。
 
-这个 skill 不会强制规定文件分类方式，也不会自动移动你的 PDF。之后如果你想清理文件夹、重命名或分类，直接让 Codex 按你的想法处理即可。
+分类方式是工作区偏好，不是固定分类表。你可以直接告诉 Codex 想如何分组，它会同步更新规则和工作区 `AGENTS.md`。
 
 ## 自定义
 

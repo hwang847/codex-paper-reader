@@ -5,7 +5,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import re
+import shutil
+import subprocess
 import unicodedata
 from pathlib import Path
 from urllib.parse import urlparse
@@ -340,43 +343,88 @@ def looks_generic_title(title: str) -> bool:
     normalized = normalize(title)
     if len(normalized) < 4:
         return True
-    generic = (
+    generic_exact = {
         "untitled",
         "paper",
         "microsoft word",
         "conference acronym",
         "arxiv",
+    }
+    generic_prefixes = (
+        "untitled ",
+        "microsoft word",
+        "conference acronym",
+        "arxiv",
+        "published as a conference paper",
+        "findings of the association for computational linguistics",
+        "proceedings of the ",
+        "association for computational linguistics",
     )
-    return any(value in normalized for value in generic)
+    return normalized in generic_exact or normalized.startswith(generic_prefixes)
+
+
+def title_preamble_line(line: str) -> bool:
+    normalized = normalize(line)
+    if looks_generic_title(line):
+        return True
+    return (
+        "association for computational linguistics" in normalized
+        or normalized.startswith("permission to make")
+        or normalized.startswith("copyright ")
+    )
+
+
+def author_or_affiliation_line(line: str) -> bool:
+    if "@" in line:
+        return True
+    if re.search(r"\b(university|institute|college|school|laboratory|department|inc)\b", line, re.I):
+        return True
+    if re.search(r"\b[A-Z][A-Za-z'`-]+(?:\s+[A-Z][A-Za-z'`-]+){1,3}\d", line):
+        return True
+    names = re.findall(r"\b[A-Z][a-z]+(?:[-'][A-Za-z]+)?\b", line)
+    return line.count(",") >= 2 and len(names) >= 4
 
 
 def extract_pdf_title(pdf_path: Path) -> str | None:
+    text = ""
     try:
         from pypdf import PdfReader
 
-        reader = PdfReader(str(pdf_path))
-        metadata_title = clean_pdf_text(str(reader.metadata.title or ""))
-        if metadata_title and not looks_generic_title(metadata_title):
-            return metadata_title
+        logger = logging.getLogger("pypdf")
+        previous_level = logger.level
+        logger.setLevel(logging.ERROR)
+        try:
+            reader = PdfReader(str(pdf_path))
+            metadata_title = clean_pdf_text(str(reader.metadata.title or ""))
+            if metadata_title and not looks_generic_title(metadata_title):
+                return metadata_title
 
-        text = reader.pages[0].extract_text() or ""
+            text = reader.pages[0].extract_text() or ""
+        finally:
+            logger.setLevel(previous_level)
     except Exception:
-        return None
+        text = ""
+
+    if not text and shutil.which("pdftotext"):
+        result = subprocess.run(
+            [shutil.which("pdftotext") or "pdftotext", "-f", "1", "-l", "1", str(pdf_path), "-"],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        if result.returncode == 0:
+            text = result.stdout
 
     lines = [clean_pdf_text(line) for line in text.splitlines()]
     lines = [line for line in lines if line and not re.fullmatch(r"\d+", line)]
-    lines = [
-        line
-        for line in lines[:20]
-        if not normalize(line).startswith(("arxiv", "conference acronym", "permission to make"))
-    ]
+    lines = [line for line in lines[:20] if not title_preamble_line(line)]
     if not lines:
         return None
 
     title = lines[0]
     joiners = {"a", "an", "the", "of", "for", "to", "via", "with", "and", "or", "in", "on"}
     for line in lines[1:4]:
-        if "@" in line or re.search(r"\b(university|institute|college|school|laboratory|department)\b", line, re.I):
+        if author_or_affiliation_line(line):
             break
         previous_last = title.split()[-1].lower().strip(":,")
         should_join = previous_last in joiners or len(title) < 80 or title.endswith(("-", ":", "for"))

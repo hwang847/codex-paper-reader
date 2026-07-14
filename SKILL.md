@@ -22,6 +22,7 @@ python3 <skill-dir>/scripts/paper_workflow.py --root "$PWD" setup
 python3 <skill-dir>/scripts/paper_workflow.py --root "$PWD" doctor
 python3 <skill-dir>/scripts/paper_workflow.py --root "$PWD" add <path|arxiv_id|url>
 python3 <skill-dir>/scripts/paper_workflow.py --root "$PWD" refresh
+python3 <skill-dir>/scripts/paper_workflow.py --root "$PWD" organize --apply
 python3 <skill-dir>/scripts/paper_workflow.py --root "$PWD" find "<title|alias|arxiv_id>"
 python3 <skill-dir>/scripts/paper_workflow.py --root "$PWD" readpack "<title|alias|path>"
 python3 <skill-dir>/scripts/paper_workflow.py --root "$PWD" render-page "<title|alias|path>" --page <n> --output <png> --dpi auto
@@ -38,7 +39,7 @@ python3 <skill-dir>/scripts/paper_workflow.py --root "$PWD" source link "<entity
 python3 <skill-dir>/scripts/paper_workflow.py --root "$PWD" source show "<entity query>"
 ```
 
-Text extraction needs one of `pypdf`, PyMuPDF, or system `pdftotext`. Screenshots need Ghostscript or PyMuPDF; Pillow is needed only for cropping.
+Text extraction needs one of `pypdf`, PyMuPDF, or system `pdftotext`. Screenshots need Ghostscript, PyMuPDF, or Poppler `pdftoppm`; Pillow is needed only for cropping.
 
 ## Workspace Setup
 
@@ -53,16 +54,16 @@ When the user asks to set up, initialize, or configure a literature workspace:
 7. When future conversation reveals stable preference changes, maintain `AGENTS.md` so it stays current.
 
 This skill provides a base workflow, not a final universal policy. Let the user's local `AGENTS.md` evolve through conversation.
-Do not add generic folder organization logic to the skill. Use scripts for deterministic indexing, source tracking, rendering, and naming; let Codex handle ad hoc cleanup, moving, renaming, or classification only when the user explicitly asks.
+Use `organize --apply` when the workspace policy enables automatic filing or the user asks to organize. The command uses local rules, preserves duplicates with collision suffixes, updates local references, and leaves low-confidence items in the configured fallback category. Codex may review or edit the rules when the user's preferred taxonomy changes.
 
 ## Folder Contract
 
 - New PDFs can be dropped in the root folder as inbox items.
-- Organized PDFs may live under `papers/`.
+- Organized PDFs live under `papers/<category>/`; PDFs dropped at the workspace root are inbox items.
 - HTML notes go under `notes/`; screenshots go under `notes/assets/`.
 - Search index: `references/paper_index.jsonl`.
 - Source registry: `references/source_registry.jsonl`.
-- Do not move, rename, classify, or delete files unless explicitly asked.
+- Do not apply organization or delete files unless the workspace policy or the user explicitly authorizes it. A dry-run organization plan is always available.
 
 ## Source Model
 
@@ -79,7 +80,7 @@ If a matched entity has no local PDF, explain that and use available local/web s
 
 ## Reading Pipeline
 
-1. If new files were copied in, run `refresh`.
+1. If new files were copied in, run `refresh`, then `organize --apply` when automatic filing is enabled.
 2. Run `readpack` for papers with PDFs; use `source show` for non-PDF or multi-source entities.
    `readpack` may identify method-like sections as `method`, `workflow`, or `system`; use `method_heading`, `method_label`, and `section_candidates` before doing any manual PDF text scan.
 3. Start by translating or summarizing the abstract in the user's language when an abstract exists; use adaptive wording, not a fixed heading.
@@ -88,7 +89,7 @@ If a matched entity has no local PDF, explain that and use available local/web s
 6. Add an end-to-end example or pseudocode/interfaces only when useful.
 7. Skip experiments/results unless the user explicitly asks, except for minimal claims needed to explain motivation or contribution.
 
-If the work is adjacent to Text-to-SQL rather than pure Text-to-SQL, explain its relation to Text-to-SQL/data-agent work instead of forcing a SQL framing.
+If the work is adjacent to, rather than central to, the user's research focus, explain that relation instead of forcing a domain-specific framing.
 
 ## HTML Notes
 

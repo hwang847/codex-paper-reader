@@ -24,6 +24,7 @@ Codex can then help you:
 
 - Set up the workspace, index PDFs, and record sources.
 - Match copied paper titles to local files such as arXiv IDs, conference IDs, or generic download names.
+- Rename PDFs from detected titles and file them into configurable topic folders, while updating local references and preserving duplicates.
 - Turn dense papers into explanations that fit your reading style.
 - Answer follow-up questions about methods, pipelines, implementation details, related work, or survey positioning.
 - Generate concise HTML notes from the paper and your discussion, with screenshots when local PDF rendering is available.
@@ -44,7 +45,7 @@ Codex itself handles the flexible parts through conversation:
 - explaining the paper in your preferred language and style;
 - adapting emphasis, such as method pipelines, implementation details, or related work;
 - updating the workspace-local `AGENTS.md` when your preferences become stable;
-- cleaning, moving, renaming, or classifying files only when you explicitly ask.
+- applying organization when the workspace policy or your request enables it; Codex can review the rules when your taxonomy changes.
 
 ## Quickstart
 
@@ -63,7 +64,7 @@ Open the folder you want to use as your literature workspace, or `cd` into it, t
 Use $literature-workflow to set up this literature workspace.
 ```
 
-Codex will create the workspace structure, initialize indexes, check local capabilities, and maintain a compact `AGENTS.md` for your preferences. You do not need to prepare folders or Python packages by hand.
+Codex will create the workspace structure, initialize indexes, check local capabilities, and maintain a compact `AGENTS.md` for your preferences. You do not need to prepare folders or Python packages by hand. If you want automatic filing, say so while setting up the workspace; Codex will use local organization rules and keep ambiguous items in a fallback folder.
 
 Then drop PDFs into the workspace and talk naturally:
 
@@ -80,7 +81,7 @@ You do not need to rename downloaded PDFs. Files named like `2508.05002v1.pdf`, 
 
 After the workspace is set up:
 
-1. Put new PDFs in the workspace root or under `papers/`.
+1. Put new PDFs in the workspace root as inbox items, or directly under `papers/`.
 2. Open the paper in your PDF reader.
 3. Copy the paper title.
 4. Tell Codex:
@@ -90,7 +91,7 @@ Use $literature-workflow. Read this paper with me:
 APEX-SQL: Talking to the data via Agentic Exploration for Text-to-SQL
 ```
 
-Codex will refresh the index when needed, match the copied title to the local PDF, prepare a reading pack, and start an interactive reading session. You can ask follow-up questions about the method, pipeline, implementation details, related work, or any part you care about.
+Codex will refresh the index when needed, optionally rename and categorize the new PDF, match the copied title to the local file, prepare a reading pack, and start an interactive reading session. You can ask follow-up questions about the method, pipeline, implementation details, related work, or any part you care about.
 
 When you are ready, ask Codex to generate an HTML note. The note is based on the paper plus your discussion, so it should reflect your focus instead of becoming a generic summary.
 
@@ -98,16 +99,16 @@ When you are ready, ask Codex to generate an HTML note. The note is based on the
 
 ```text
 your-workspace/
-├── papers/                 # optional PDFs you organize yourself
+├── papers/                 # categorized PDFs, such as papers/methods/
 ├── notes/                  # HTML notes
 │   └── assets/             # screenshots
 ├── references/             # index and source registry
 └── AGENTS.md               # local Codex preferences
 ```
 
-New PDFs can stay in the workspace root as inbox items. Codex can also work with PDFs already placed under `papers/`.
+New PDFs can stay in the workspace root as inbox items. When organization is enabled, Codex moves them to `papers/<category>/` and normalizes the filename from the paper title. The rules are editable at `references/organization_rules.json`.
 
-The skill does not impose a filing scheme or move your PDFs around. If you later want folder cleanup, renaming, or classification, just ask Codex directly.
+The filing scheme is a local preference, not a fixed taxonomy. Tell Codex how you want papers grouped, and it can update the rules and workspace `AGENTS.md`.
 
 ## Customize
 

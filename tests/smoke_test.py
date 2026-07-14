@@ -16,7 +16,8 @@ ROOT = Path(__file__).resolve().parents[1]
 TOOL = ROOT / "scripts" / "paper_workflow.py"
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from paper_workflow import method_like_section, section_candidates  # noqa: E402
+from build_paper_index import looks_generic_title  # noqa: E402
+from paper_workflow import method_like_section, resolve_pdf, section_candidates  # noqa: E402
 
 
 def run(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
@@ -59,6 +60,9 @@ Results follow.
     assert heading == "3 GroupRAG Workflow"
     assert "community-aware retrieval" in method
     assert "3 GroupRAG Workflow" in section_candidates(sample_text)
+    assert looks_generic_title("Findings of the Association for Computational Linguistics: ACL 2025")
+    assert looks_generic_title("Proceedings of the 64th Annual Meeting of the Association for Computational Linguistics")
+    assert not looks_generic_title("What Paper Titles Teach Us About Reliable Indexing")
 
     with tempfile.TemporaryDirectory() as tmp:
         workspace = Path(tmp) / "workspace"
@@ -67,6 +71,7 @@ Results follow.
         assert (workspace / "papers").is_dir()
         assert (workspace / "notes" / "assets").is_dir()
         assert (workspace / "references" / "source_registry.jsonl").is_file()
+        assert (workspace / "references" / "organization_rules.json").is_file()
         assert setup["index_entries"] == 0
 
         (workspace / "2501.00001v1.pdf").write_bytes(b"%PDF-1.4\n% smoke test placeholder\n")
@@ -108,6 +113,80 @@ Results follow.
 
         note_name = run("--root", str(workspace), "note-name", "LinkAlign: Example Paper").stdout.strip()
         assert note_name == "linkalign.html"
+
+        organized = Path(tmp) / "organized"
+        organized.mkdir()
+        run("--root", str(organized), "setup")
+        (organized / "download.pdf").write_bytes(b"%PDF-1.4\n% smoke test placeholder\n")
+        (organized / "references" / "organization_rules.json").write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "default_category": "uncategorized",
+                    "categories": [
+                        {"name": "core", "keywords": ["text-to-sql"]},
+                        {"name": "uncategorized", "keywords": []},
+                    ],
+                    "title_overrides": {"download.pdf": "Example Text-to-SQL Paper"},
+                    "category_overrides": {},
+                }
+            ),
+            encoding="utf-8",
+        )
+        (organized / "references" / "references.bib").write_text(
+            "% Source: download.pdf\n"
+            "@article{example,\n"
+            "  title = {Example Text-to-SQL Paper},\n"
+            "  note = {download.pdf must not be globally rewritten}\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        (organized / "references" / "source_registry.jsonl").write_text(
+            json.dumps(
+                {
+                    "title": "Example Text-to-SQL Paper",
+                    "kind": "paper",
+                    "sources": [
+                        {
+                            "type": "pdf",
+                            "locator": "download.pdf",
+                            "role": "primary",
+                            "status": "available",
+                        }
+                    ],
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        organized_plan = json.loads(run("--root", str(organized), "organize").stdout)
+        assert organized_plan["plan"][0]["target"] == "papers/core/example_text_to_sql_paper.pdf"
+        run("--root", str(organized), "organize", "--apply")
+        assert (organized / "papers/core/example_text_to_sql_paper.pdf").is_file()
+        assert not (organized / "download.pdf").exists()
+        bib = (organized / "references" / "references.bib").read_text(encoding="utf-8")
+        assert "% Source: example_text_to_sql_paper.pdf" in bib
+        assert "note = {download.pdf must not be globally rewritten}" in bib
+        source_record = json.loads((organized / "references" / "source_registry.jsonl").read_text(encoding="utf-8"))
+        assert source_record["sources"][0]["locator"] == "papers/core/example_text_to_sql_paper.pdf"
+        assert json.loads(run("--root", str(organized), "find", "Example Text-to-SQL Paper", "--json").stdout)[0]["path"] == "papers/core/example_text_to_sql_paper.pdf"
+        resolved, resolved_item = resolve_pdf(organized, "Example Text-to-SQL Paper")
+        assert resolved == (organized / "papers/core/example_text_to_sql_paper.pdf").resolve()
+        assert resolved_item and resolved_item["title"] == "Example Text-to-SQL Paper"
+
+        invalid_rules = Path(tmp) / "invalid_rules.json"
+        invalid_rules.write_text(
+            json.dumps({"categories": [{"name": "../escape", "keywords": []}]}),
+            encoding="utf-8",
+        )
+        rejected = subprocess.run(
+            [sys.executable, "-B", str(TOOL), "--root", str(organized), "organize", "--rules", str(invalid_rules)],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        assert rejected.returncode == 2
+        assert "invalid_organization_rules" in rejected.stderr
 
         run(
             "--root",
