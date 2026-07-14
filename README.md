@@ -1,141 +1,103 @@
 # Codex Paper Reader Workflow Skill
 
-[中文说明](README.zh-CN.md)
+[中文](README.zh-CN.md) | [Changelog](CHANGELOG.md)
 
-This repository defines a literature-reading workflow and packages it as a Codex skill, so you can use that workflow directly inside Codex.
+Use this Codex skill beside your usual PDF reader. Keep reading in Zotero, Office, Preview, or a browser; Codex finds the local PDF behind a copied title, explains the paper with you, tracks related sources, and writes concise HTML notes from your discussion.
 
-This repository is developed and maintained with Codex.
+Built and maintained with Codex.
 
-It is designed for working with a local paper folder alongside your usual PDF reader. Use it to locate PDFs, map copied paper titles to numbered files, manage related sources, render paper screenshots, discuss method pipelines with Codex, and generate concise HTML notes shaped by your conversation.
+## What You Do
 
-This is not a built-in PDF reader. Keep reading PDFs in Zotero, Office, Preview, a browser, or any reader you like. Codex handles the searchable workspace, interactive explanation, source tracking, and notes.
+1. Install the skill once.
+2. Choose a local folder for your papers.
+3. Drop downloaded PDFs there without renaming them.
+4. Copy a title from your PDF reader and talk to Codex.
 
-## How It Works
+You do not need to make folders, rename numbered downloads, build an index, or edit a registry by hand.
 
-Your part stays small:
+## Quick Start
 
-- Install the skill once.
-- Choose a local folder as your literature workspace.
-- Drop PDFs into that folder without renaming them.
-- Copy a paper title from your PDF reader and ask Codex to read it with you.
-- Tell Codex your preferences when they matter.
-
-Codex can then help you:
-
-- Set up the workspace, index PDFs, and record sources.
-- Match copied paper titles to local files such as arXiv IDs, conference IDs, or generic download names.
-- Rename PDFs from detected titles and file them into configurable topic folders, while updating local references and preserving duplicates.
-- Turn dense papers into explanations that fit your reading style.
-- Answer follow-up questions about methods, pipelines, implementation details, related work, or survey positioning.
-- Generate concise HTML notes from the paper and your discussion, with screenshots when local PDF rendering is available.
-
-## Workflow Boundary
-
-This skill gives Codex the stable workflow pieces that are repetitive or fragile to redo manually:
-
-- workspace setup and environment checks;
-- PDF indexing and copied-title lookup;
-- source registry for PDFs, arXiv, DOI, project pages, repos, docs, and slides;
-- reading-pack preparation;
-- PDF screenshot rendering for notes;
-- note filename normalization.
-
-Codex itself handles the flexible parts through conversation:
-
-- explaining the paper in your preferred language and style;
-- adapting emphasis, such as method pipelines, implementation details, or related work;
-- updating the workspace-local `AGENTS.md` when your preferences become stable;
-- applying organization when the workspace policy or your request enables it; Codex can review the rules when your taxonomy changes.
-
-## Quickstart
-
-Install:
+Install the skill:
 
 ```bash
 mkdir -p ~/.codex/skills
 git clone https://github.com/hwang847/codex-paper-reader.git ~/.codex/skills/literature-workflow
 ```
 
-Restart Codex App or open a new Codex CLI session.
-
-Open the folder you want to use as your literature workspace, or `cd` into it, then tell Codex:
+Restart Codex App or open a new Codex CLI session. Then open your chosen paper folder, or `cd` into it, and say:
 
 ```text
 Use $literature-workflow to set up this literature workspace.
 ```
 
-Codex will create the workspace structure, initialize indexes, check local capabilities, and maintain a compact `AGENTS.md` for your preferences. You do not need to prepare folders or Python packages by hand. If you want automatic filing, say so while setting up the workspace; Codex will use local organization rules and keep ambiguous items in a fallback folder.
+Codex creates the workspace, checks available PDF tools, and writes a compact local `AGENTS.md` from your preferences. Say that you want automatic filing if you want new papers organized automatically.
 
-Then drop PDFs into the workspace and talk naturally:
+## Read a Paper
 
-```text
-Refresh the index.
-Read this paper with me.
-Explain the method pipeline.
-Generate an HTML note.
-```
+After setup, your everyday loop is simple:
 
-## Everyday Use
-
-You do not need to rename downloaded PDFs. Files named like `2508.05002v1.pdf`, `2025.findings-naacl.245.pdf`, or `download.pdf` are fine.
-
-After the workspace is set up:
-
-1. Put new PDFs in the workspace root as inbox items, or directly under `papers/`.
-2. Open the paper in your PDF reader.
-3. Copy the paper title.
-4. Tell Codex:
+1. Put a new PDF in the workspace root. Names such as `2508.05002v1.pdf`, `2025.findings-naacl.245.pdf`, and `download.pdf` are all fine.
+2. Open it in your normal PDF reader and copy its title.
+3. Paste the title into Codex:
 
 ```text
 Use $literature-workflow. Read this paper with me:
 APEX-SQL: Talking to the data via Agentic Exploration for Text-to-SQL
 ```
 
-Codex will refresh the index when needed, optionally rename and categorize the new PDF, match the copied title to the local file, prepare a reading pack, and start an interactive reading session. You can ask follow-up questions about the method, pipeline, implementation details, related work, or any part you care about.
+Codex refreshes the local index when needed, identifies the corresponding file, starts from the abstract, then explains the thesis and implementable method pipeline. Ask follow-up questions naturally, for example:
 
-When you are ready, ask Codex to generate an HTML note. The note is based on the paper plus your discussion, so it should reflect your focus instead of becoming a generic summary.
+```text
+Walk me through the pipeline as if I had to implement it.
+What state does each agent keep, and how does feedback change the next step?
+Relate this paper to the literature review I am writing.
+Generate a concise HTML note for this paper.
+```
 
-## Workspace
+The HTML note reflects the paper and your discussion. Later questions that change the interpretation should update the same note; supported local renderers can add native PDF screenshots.
+
+## Automatic Rename and Filing
+
+Automatic filing is opt-in: enable it while setting up the workspace, or ask Codex to organize the new PDFs.
+
+When enabled, the workflow:
+
+- detects the real title from PDF text and ignores generic conference metadata when possible;
+- renames a download to a normalized paper-title filename;
+- places it in one primary `papers/<category>/` folder using editable local rules;
+- preserves duplicate files with a suffix instead of overwriting them;
+- updates the search index, source registry, BibTeX `Source` comments, and links in local notes when paths change.
+
+The starter categories are deliberately general. Tell Codex how you want your library grouped, and it will adapt `references/organization_rules.json` and your workspace-local `AGENTS.md`. Ambiguous papers stay in the fallback category. The workflow never deletes PDFs.
+
+## What Codex Maintains
 
 ```text
 your-workspace/
-├── papers/                 # categorized PDFs, such as papers/methods/
+├── papers/                 # organized PDFs
 ├── notes/                  # HTML notes
-│   └── assets/             # screenshots
-├── references/             # index and source registry
-└── AGENTS.md               # local Codex preferences
+│   └── assets/             # native PDF screenshots
+├── references/             # search index, source registry, filing rules
+└── AGENTS.md               # your durable reading preferences
 ```
 
-New PDFs can stay in the workspace root as inbox items. When organization is enabled, Codex moves them to `papers/<category>/` and normalizes the filename from the paper title. The rules are editable at `references/organization_rules.json`.
+One reading target can have many sources: a local PDF, arXiv, DOI, project page, repository, slides, or technical documentation. Codex records these as one entity, so a copied title does not need to match the downloaded filename.
 
-The filing scheme is a local preference, not a fixed taxonomy. Tell Codex how you want papers grouped, and it can update the rules and workspace `AGENTS.md`.
+## Make It Yours
 
-## Customize
-
-Tell Codex what you care about:
+Tell Codex preferences in ordinary language:
 
 ```text
-My notes should focus on implementation details and pipeline reconstruction.
-Prefer concise HTML notes.
-Skip experiments unless I ask.
 Use Chinese for reading and notes.
-I am writing a literature review, so focus more on related work and positioning.
-Track project pages and GitHub repos as sources.
+Focus on implementation details and pipeline reconstruction.
+Skip experiments unless I ask.
+I am writing a survey, so emphasize related work and positioning.
+Track project pages and GitHub repositories with each paper.
 ```
 
-Codex will turn stable preferences into local `AGENTS.md` rules and update them as your workflow changes.
-
-## Sources
-
-A read target is an entity: `paper`, `tech_doc`, `repo`, `spec`, `dataset`, `slides`, or `unknown`.
-
-A source points to an entity: PDF, arXiv, DOI, URL, GitHub repo, local document, project page, slides, etc.
-
-One entity can have multiple sources. For example, a paper may have a local PDF, arXiv URL, DOI, project page, and GitHub repo.
+Codex keeps durable preferences compactly in that workspace's `AGENTS.md`; the public skill supplies the mechanics, while your workspace defines the research context.
 
 ## For Maintainers
-
-Run tests from this repository root:
 
 ```bash
 python3 tests/smoke_test.py
