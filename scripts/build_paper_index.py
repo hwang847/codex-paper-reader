@@ -57,8 +57,18 @@ def entity_id(title: str) -> str:
     return slug(method_alias(title) or title)
 
 
+def path_within_root(root: Path, path: Path, label: str) -> Path:
+    root = root.resolve()
+    resolved = path.resolve()
+    try:
+        resolved.relative_to(root)
+    except ValueError as exc:
+        raise ValueError(f"{label} must stay inside workspace root: {path}") from exc
+    return resolved
+
+
 def load_source_registry(root: Path) -> list[dict[str, object]]:
-    path = root / SOURCE_REGISTRY
+    path = path_within_root(root, root / SOURCE_REGISTRY, "source registry")
     if not path.exists():
         return []
     records: list[dict[str, object]] = []
@@ -440,9 +450,18 @@ def extract_pdf_title(pdf_path: Path) -> str | None:
 
 
 def library_pdfs(root: Path) -> list[Path]:
-    paths = list((root / "papers").rglob("*.pdf"))
+    papers_dir = path_within_root(root, root / "papers", "papers directory")
+    paths = list(papers_dir.rglob("*.pdf")) if papers_dir.exists() else []
     paths.extend(sorted(root.glob("*.pdf")))
-    return sorted({path.resolve() for path in paths})
+    safe_paths = []
+    for path in paths:
+        if path.is_symlink():
+            continue
+        try:
+            safe_paths.append(path_within_root(root, path, "PDF path"))
+        except ValueError:
+            continue
+    return sorted(set(safe_paths))
 
 
 def pdf_map(root: Path) -> dict[str, Path]:
@@ -461,6 +480,8 @@ def record_aliases(record: dict[str, str], pdf_name: str) -> list[str]:
 
 
 def build_index(root: Path, bib_path: Path) -> list[dict[str, object]]:
+    root = root.resolve()
+    bib_path = path_within_root(root, bib_path, "BibTeX path")
     pdfs = pdf_map(root)
     records = parse_bib_entries(bib_path)
     index: list[dict[str, object]] = []
@@ -533,8 +554,13 @@ def main() -> int:
     args = parser.parse_args()
 
     root = Path(args.root).resolve()
-    bib_path = (root / args.bib).resolve()
-    output = (root / args.output).resolve()
+    if not root.is_dir():
+        parser.error(f"workspace root is not a directory: {root}")
+    try:
+        bib_path = path_within_root(root, root / args.bib, "BibTeX path")
+        output = path_within_root(root, root / args.output, "output path")
+    except ValueError as exc:
+        parser.error(str(exc))
     index = build_index(root, bib_path)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(

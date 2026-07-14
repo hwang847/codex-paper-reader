@@ -5,7 +5,7 @@ Use this reference only after the user explicitly asks to place a research artif
 ## Setup
 
 1. Check `lark-cli --version`.
-2. If absent, install the official CLI: `npx @larksuite/cli@latest install`.
+2. If absent, state the exact official package/version command and obtain the user's explicit approval before installing it. Do not install `@latest` automatically.
 3. Read the version-matched official guide with `lark-cli skills read lark-shared`, then read the target-domain guide.
 4. If unconfigured, run `lark-cli config init --new` and relay its authorization URL unchanged with the required QR code. For user-space research work, authenticate only the needed domains, normally `docs`, `drive`, `markdown`, or `wiki`.
 

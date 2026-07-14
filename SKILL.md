@@ -42,7 +42,7 @@ python3 <skill-dir>/scripts/paper_workflow.py --root "$PWD" source link "<entity
 python3 <skill-dir>/scripts/paper_workflow.py --root "$PWD" source show "<entity query>"
 ```
 
-Text extraction needs one of `pypdf`, PyMuPDF, or system `pdftotext`. Screenshots need Ghostscript, PyMuPDF, or Poppler `pdftoppm`; Pillow is needed only for cropping.
+The scripts require Python 3.9+. Text extraction needs one of `pypdf`, PyMuPDF, or system `pdftotext`. Screenshots need Ghostscript, PyMuPDF, or Poppler `pdftoppm`; Pillow is needed only for cropping.
 
 ## Workspace Setup
 
@@ -53,7 +53,7 @@ When the user asks to set up, initialize, or configure a literature workspace:
 3. Read `references/workspace_setup.md`.
 4. Use the user's stated preferences and the current conversation to create or update the workspace-local `AGENTS.md`.
 5. Keep `AGENTS.md` personalized and compact; do not blindly copy a template.
-6. If optional dependencies are missing, explain their impact briefly and offer to install or proceed without that feature.
+6. If optional dependencies are missing, explain their impact and exact install command briefly; obtain explicit approval before installing, or proceed without that feature.
 7. When future conversation reveals stable preference changes, maintain `AGENTS.md` so it stays current.
 
 This skill provides a base workflow, not a final universal policy. Let the user's local `AGENTS.md` evolve through conversation.
@@ -68,6 +68,7 @@ Use `organize --apply` when the workspace policy enables automatic filing or the
 - Search index: `references/paper_index.jsonl`.
 - Source registry: `references/source_registry.jsonl`.
 - Do not apply organization or delete files unless the workspace policy or the user explicitly authorizes it. A dry-run organization plan is always available.
+- Treat a workspace as single-writer while a workflow command runs. Do not let a sync client, another Codex session, or another process rename its managed directories concurrently; the workflow detects file conflicts but cannot provide cross-process database locks.
 
 ## Source Model
 
@@ -98,7 +99,7 @@ Read `references/survey_workflow.md` before designing a nontrivial survey, compa
 
 Use this only when the user explicitly asks to deposit, publish, sync, or manage research artifacts in Feishu/Lark.
 
-1. Check `lark-cli`. If it is missing, install the official CLI with `npx @larksuite/cli@latest install`; do not ask the user to install it manually.
+1. Check `lark-cli`. If it is missing, name the exact official package/version command and obtain the user's explicit approval before installing it. Never install `@latest` automatically.
 2. Before any Lark command, read the version-matched official `lark-cli skills read lark-shared` and the relevant `lark-doc`, `lark-drive`, `lark-markdown`, or `lark-wiki` guide.
 3. Help configure and authenticate only when required. Never expose secrets, preserve opaque authorization URLs exactly, and use the official device flow.
 4. Require a concrete Drive folder URL/token or Wiki URL/token and explicit publication intent before writing. Preview with `--dry-run` where available; do not overwrite, move, sync, delete, or change permissions without a separate confirmation.

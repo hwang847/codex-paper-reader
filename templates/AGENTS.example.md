@@ -19,4 +19,4 @@
 - Avoid reusable prose templates. Headings and note structure should follow the document, the discussion, and the user's current question.
 - Mark missing details clearly; label nontrivial interpretation as inference.
 - HTML notes require an explicit note trigger, use the workflow filename rule, stay minimal, and should be updated if later discussion changes the understanding.
-- For Feishu/Lark, install and use the official `lark-cli` only when the user asks for cloud work. Require an exact destination and explicit publication intent; never overwrite, sync, move, delete, or change permissions without separate confirmation.
+- For Feishu/Lark, use the official `lark-cli` only when the user asks for cloud work. If it is missing, state the exact install command and obtain explicit approval before installing. Require an exact destination and explicit publication intent; never overwrite, sync, move, delete, or change permissions without separate confirmation.

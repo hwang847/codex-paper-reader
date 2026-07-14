@@ -29,3 +29,10 @@
 
 - Rewrote the user quickstart around the normal reader-to-Codex workflow.
 - Added coverage for organization, source-path migration, unsafe rules, title extraction, and renderer fallback.
+
+### Security hardening
+
+- Keep every generated index, survey artifact, note screenshot, and organization target inside the workspace; reject traversal and external symlink escapes.
+- Restrict path migration to generated survey metadata and actual HTML link attributes, preserving user prose and registered source documents.
+- Harden remote PDF imports: public HTTP(S) hosts only, redirects blocked, 100 MiB streaming limit, temporary-file validation, and atomic final placement.
+- Require explicit approval before installing a missing Feishu/Lark CLI; added regression coverage for the new boundaries.

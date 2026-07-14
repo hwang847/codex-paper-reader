@@ -17,6 +17,8 @@ You do not need to make folders, rename numbered downloads, build an index, or e
 
 ## Quick Start
 
+Requires Python 3.9 or later. Optional PDF text/rendering tools are checked by Codex during setup.
+
 Install the skill:
 
 ```bash
@@ -90,7 +92,7 @@ When a note, survey artifact, or sharing path is ready, give Codex the exact Dri
 Use $literature-workflow to publish recommended_readings.md to this Feishu folder: <link>.
 ```
 
-Codex checks for the official `lark-cli`, installs it if needed, guides the one-time authorization, previews the write when supported, and then creates the requested cloud artifact. It will not sync, overwrite, move, delete, or change sharing permissions unless you explicitly ask.
+Codex checks for the official `lark-cli`, explains the exact install before asking permission to install it, guides the one-time authorization, previews the write when supported, and then creates the requested cloud artifact. It will not sync, overwrite, move, delete, or change sharing permissions unless you explicitly ask.
 
 ## What Codex Maintains
 

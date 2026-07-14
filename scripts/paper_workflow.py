@@ -4,18 +4,24 @@
 from __future__ import annotations
 
 import argparse
+import errno
+import http.client
+import ipaddress
 import json
 import os
 import re
 import shutil
+import socket
+import stat
 import subprocess
 import sys
 import tempfile
 import unicodedata
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import urlparse
-from urllib.request import Request, urlopen
+from urllib.parse import urlparse, urlunparse
+from urllib.request import HTTPHandler, HTTPRedirectHandler, HTTPSHandler, ProxyHandler, Request, build_opener
 
 from build_paper_index import build_index, extract_pdf_title
 from find_paper import index_is_stale, score
@@ -26,6 +32,7 @@ ARXIV_IN_TEXT_RE = re.compile(r"(?P<id>\d{4}\.\d{4,5})(?P<version>v\d+)?")
 AMBIGUITY_MARGIN = 0.03
 MIN_CONFIDENT_SCORE = 0.92
 SOURCE_REGISTRY = Path("references/source_registry.jsonl")
+ORGANIZATION_JOURNAL = Path("references/organization_recovery.json")
 SOURCE_KINDS = {"paper", "survey", "tech_doc", "spec", "blog", "repo", "dataset", "slides", "unknown"}
 LOCAL_SOURCE_TYPES = {"pdf", "doc", "html", "text", "path"}
 WORKSPACE_DIRS = ("papers", "notes", "notes/assets", "references", "surveys", "surveys/sources")
@@ -35,6 +42,11 @@ SURVEY_SOURCES_DIR = SURVEYS_DIR / "sources"
 SURVEY_MANIFEST = "manifest.json"
 SURVEY_READING_PACK = "reading_pack.md"
 SURVEY_DOCUMENT_SUFFIXES = {".md", ".txt", ".rst", ".html", ".htm", ".docx"}
+MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024
+WELL_KNOWN_NAT64_PREFIXES = (
+    ipaddress.ip_network("64:ff9b::/96"),
+    ipaddress.ip_network("64:ff9b:1::/48"),
+)
 
 DEFAULT_ORGANIZATION_RULES = {
     "version": 1,
@@ -151,10 +163,37 @@ def ensure_root(root: Path) -> None:
         raise WorkflowError("root_not_dir", f"workspace root is not a directory: {root}")
 
 
-def write_index(root: Path) -> list[dict]:
-    ensure_root(root)
+def workspace_path(root: Path, path: Path | str, label: str) -> Path:
+    """Resolve a managed path and reject symlink or traversal escapes."""
+    resolved_root = root.resolve()
+    candidate = Path(path).expanduser()
+    if not candidate.is_absolute():
+        candidate = resolved_root / candidate
+    resolved = candidate.resolve()
     try:
-        index = build_index(root, root / "references/references.bib")
+        resolved.relative_to(resolved_root)
+    except ValueError as exc:
+        raise WorkflowError(
+            "workspace_path_escape",
+            f"{label} must stay inside the workspace root: {path}",
+        ) from exc
+    return resolved
+
+
+def is_workspace_path(root: Path, path: Path) -> bool:
+    try:
+        workspace_path(root, path, "path")
+    except WorkflowError:
+        return False
+    return True
+
+
+def write_index(root: Path) -> list[dict]:
+    root = root.resolve()
+    ensure_root(root)
+    bib_path = workspace_path(root, "references/references.bib", "BibTeX path")
+    try:
+        index = build_index(root, bib_path)
     except ValueError as exc:
         raise WorkflowError("index_build_failed", str(exc)) from exc
     rules = load_organization_rules(root)
@@ -170,7 +209,7 @@ def write_index(root: Path) -> list[dict]:
             item["normalized_aliases"] = [normalize(alias) for alias in item["aliases"]]
             item["title_source"] = "organization_rules"
             break
-    output = root / "references/paper_index.jsonl"
+    output = workspace_path(root, "references/paper_index.jsonl", "paper index")
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(
         "\n".join(json.dumps(item, ensure_ascii=False, sort_keys=True) for item in index) + "\n",
@@ -180,8 +219,9 @@ def write_index(root: Path) -> list[dict]:
 
 
 def read_index(root: Path) -> list[dict]:
+    root = root.resolve()
     ensure_root(root)
-    index_path = root / "references/paper_index.jsonl"
+    index_path = workspace_path(root, "references/paper_index.jsonl", "paper index")
     if index_is_stale(root, index_path):
         write_index(root)
     try:
@@ -206,12 +246,13 @@ def find_matches(root: Path, query: str, limit: int) -> list[dict]:
 
 
 def resolve_pdf(root: Path, query: str) -> tuple[Path, dict | None]:
+    root = root.resolve()
     path = Path(query).expanduser()
     if path.exists():
-        return path.resolve(), None
+        return workspace_path(root, path, "PDF source"), None
     path = root / query
     if path.exists():
-        return path.resolve(), None
+        return workspace_path(root, path, "PDF source"), None
     normalized_query = normalize(query)
     if normalized_query:
         exact = []
@@ -222,7 +263,7 @@ def resolve_pdf(root: Path, query: str) -> tuple[Path, dict | None]:
                 exact.append(item)
         if len(exact) == 1:
             if exact[0].get("path"):
-                return (root / str(exact[0]["path"])).resolve(), exact[0]
+                return workspace_path(root, str(exact[0]["path"]), "indexed PDF"), exact[0]
             raise WorkflowError("no_pdf_source", f"matched entity has no local PDF source: {exact[0].get('title', query)}", exact[0])
         if len(exact) > 1:
             raise WorkflowError("ambiguous_match", "paper query is ambiguous", exact)
@@ -241,7 +282,7 @@ def resolve_pdf(root: Path, query: str) -> tuple[Path, dict | None]:
             raise WorkflowError("ambiguous_match", "paper query is ambiguous", matches)
     if not top.get("path"):
         raise WorkflowError("no_pdf_source", f"matched item has no local PDF source: {top.get('title', query)}", top)
-    return (root / top["path"]).resolve(), top
+    return workspace_path(root, str(top["path"]), "indexed PDF"), top
 
 
 def item_locator(item: dict) -> str:
@@ -420,6 +461,7 @@ def effective_organization_title(root: Path, item: dict, pdf_path: Path, rules: 
 
 
 def organization_items(root: Path, rules: dict) -> list[dict]:
+    root = root.resolve()
     index = write_index(root)
     by_path: dict[str, tuple[str, dict]] = {}
     for item in index:
@@ -433,25 +475,33 @@ def organization_items(root: Path, rules: dict) -> list[dict]:
             by_path[key] = (rel_path, item)
 
     planned = []
-    source_paths = {(root / rel_path).resolve() for rel_path, _ in by_path.values()}
+    sources_by_path: dict[str, Path] = {}
+    for rel_path, _ in by_path.values():
+        lexical_path = root / rel_path
+        if lexical_path.is_symlink():
+            raise WorkflowError("unsafe_source_path", f"refusing to organize symlinked PDF: {rel_path}")
+        resolved_path = workspace_path(root, lexical_path, "PDF source")
+        if resolved_path.exists() and resolved_path.is_file():
+            sources_by_path[rel_path] = resolved_path
+    source_paths = set(sources_by_path.values())
     reserved: set[Path] = set()
     for _, (rel_path, item) in sorted(by_path.items()):
-        source = (root / rel_path).resolve()
-        if not source.exists() or not source.is_file():
+        source = sources_by_path.get(rel_path)
+        if source is None:
             continue
         title, title_source = effective_organization_title(root, item, source, rules)
         category, evidence = classify_paper(item, title, rules, rel_path)
-        target = root / "papers" / category / paper_filename(title, source.name)
+        target = workspace_path(root, Path("papers") / category / paper_filename(title, source.name), "organization target")
         collision = 1
         while target.resolve() in reserved or (target.exists() and target.resolve() not in {source} and target.resolve() not in source_paths):
             collision += 1
-            target = target.with_name(f"{target.stem}_{collision}{target.suffix}")
+            target = workspace_path(root, target.with_name(f"{target.stem}_{collision}{target.suffix}"), "organization target")
         if target.resolve() in source_paths and target.resolve() != source:
             collision = 2
-            candidate = target.with_name(f"{target.stem}_{collision}{target.suffix}")
+            candidate = workspace_path(root, target.with_name(f"{target.stem}_{collision}{target.suffix}"), "organization target")
             while candidate.resolve() in reserved or (candidate.exists() and candidate.resolve() not in source_paths):
                 collision += 1
-                candidate = target.with_name(f"{target.stem}_{collision}{target.suffix}")
+                candidate = workspace_path(root, target.with_name(f"{target.stem}_{collision}{target.suffix}"), "organization target")
             target = candidate
         reserved.add(target.resolve())
         planned.append(
@@ -469,7 +519,7 @@ def organization_items(root: Path, rules: dict) -> list[dict]:
 
 
 def rewrite_bib_sources(root: Path, mapping: dict[str, str]) -> None:
-    path = root / "references/references.bib"
+    path = workspace_path(root, "references/references.bib", "BibTeX path")
     if not path.exists():
         return
     by_name = {organization_key(Path(old).name): Path(new).name for old, new in mapping.items()}
@@ -507,108 +557,386 @@ def rewrite_source_registry(root: Path, mapping: dict[str, str]) -> None:
     write_source_records(root, records)
 
 
-def protected_local_document_paths(root: Path) -> set[Path]:
-    """Return registered non-PDF sources whose authoring content is immutable."""
-    protected: set[Path] = set()
-    for record in load_source_records(root):
-        for source in record.get("sources", []):
-            if not isinstance(source, dict):
-                continue
-            source_type = str(source.get("type", "")).lower()
-            if source_type not in LOCAL_SOURCE_TYPES or source_type == "pdf":
-                continue
-            locator = str(source.get("locator", ""))
-            if not locator:
-                continue
-            path = local_source_path(root, locator, source_type)
-            if path is not None:
-                protected.add(path)
-    return protected
+def mapped_locator(value: str, mapping: dict[str, str]) -> str | None:
+    if value in mapping:
+        return mapping[value]
+    normalized = organization_key(value)
+    for old, new in mapping.items():
+        if organization_key(old) == normalized:
+            return new
+    return None
 
 
-def is_managed_reference_file(root: Path, path: Path) -> bool:
-    if path.is_relative_to(root / "notes"):
-        return True
-    try:
-        relative = path.relative_to(root / SURVEYS_DIR)
-    except ValueError:
-        return False
-    return len(relative.parts) == 2 and path.name in {SURVEY_MANIFEST, SURVEY_READING_PACK}
+def remap_structured_paths(value: object, mapping: dict[str, str]) -> tuple[object, bool]:
+    if isinstance(value, list):
+        changed = False
+        result = []
+        for item in value:
+            updated, item_changed = remap_structured_paths(item, mapping)
+            result.append(updated)
+            changed = changed or item_changed
+        return result, changed
+    if isinstance(value, dict):
+        changed = False
+        result = dict(value)
+        for key, item in value.items():
+            if key in {"path", "locator"} and isinstance(item, str):
+                replacement = mapped_locator(item, mapping)
+                if replacement is not None:
+                    result[key] = replacement
+                    changed = True
+            else:
+                updated, item_changed = remap_structured_paths(item, mapping)
+                result[key] = updated
+                changed = changed or item_changed
+        return result, changed
+    return value, False
 
 
-def rewrite_workspace_references(root: Path, mapping: dict[str, str]) -> None:
-    if not mapping:
-        return
-    replacements = sorted(mapping.items(), key=lambda pair: len(pair[0]), reverse=True)
-    text_suffixes = {".md", ".html", ".json", ".jsonl", ".txt", ".yaml", ".yml"}
-    managed_paths = {
-        root / "references/paper_index.jsonl",
-        root / "references/source_registry.jsonl",
-        root / "references/references.bib",
-    }
-    protected_paths = protected_local_document_paths(root)
-    for path in root.rglob("*"):
-        if not path.is_file() or path.suffix.lower() not in text_suffixes:
+def remap_note_link(root: Path, note_path: Path, value: str, mapping: dict[str, str]) -> str:
+    parsed = urlparse(value)
+    if parsed.scheme or parsed.netloc or not parsed.path or Path(parsed.path).is_absolute():
+        return value
+    linked_path = (note_path.parent / parsed.path).resolve()
+    for old, new in mapping.items():
+        try:
+            old_path = workspace_path(root, old, "previous PDF path")
+        except WorkflowError:
             continue
-        relative = path.relative_to(root)
-        if (
-            ".git" in relative.parts
-            or path.is_relative_to(root / "papers")
-            or path in managed_paths
-            or path.resolve() in protected_paths
-            or not is_managed_reference_file(root, path)
-        ):
+        if linked_path != old_path:
+            continue
+        new_path = workspace_path(root, new, "organized PDF path")
+        relative = os.path.relpath(new_path, start=note_path.parent.resolve()).replace(os.sep, "/")
+        return urlunparse(("", "", relative, "", parsed.query, parsed.fragment))
+    return value
+
+
+def rewrite_note_links(root: Path, mapping: dict[str, str]) -> None:
+    notes_dir = workspace_path(root, "notes", "notes directory")
+    if not notes_dir.exists():
+        return
+    attribute = re.compile(r"(?P<prefix>\b(?:href|src)\s*=\s*(?P<quote>[\"']))(?P<value>[^\"']*)(?P=quote)", re.IGNORECASE)
+    for path in notes_dir.rglob("*.html"):
+        if path.is_symlink() or not is_workspace_path(root, path):
             continue
         try:
             text = path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
             continue
-        updated = text
-        for old, new in replacements:
-            updated = re.sub(re.escape(old), new, updated, flags=re.IGNORECASE)
-            updated = re.sub(re.escape(Path(old).name), Path(new).name, updated, flags=re.IGNORECASE)
+
+        def replace(match: re.Match[str]) -> str:
+            value = match.group("value")
+            remapped = remap_note_link(root, path, value, mapping)
+            return f"{match.group('prefix')}{remapped}{match.group('quote')}"
+
+        updated = attribute.sub(replace, text)
         if updated != text:
             path.write_text(updated, encoding="utf-8")
 
 
+def rewrite_workspace_references(root: Path, mapping: dict[str, str]) -> None:
+    if not mapping:
+        return
+    # Only generated survey metadata and actual HTML link attributes are mutable.
+    # Free-form notes and registered source documents are never text-rewritten.
+    for manifest_path in survey_manifest_paths(root):
+        if manifest_path.is_symlink() or not is_workspace_path(root, manifest_path):
+            continue
+        manifest = load_survey_manifest(manifest_path)
+        updated, changed = remap_structured_paths(manifest, mapping)
+        if not changed:
+            continue
+        manifest_path.write_text(json.dumps(updated, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        pack_path = workspace_path(root, manifest_path.parent / SURVEY_READING_PACK, "survey reading pack")
+        pack_path.write_text(render_survey_reading_pack(root, manifest_path, updated), encoding="utf-8")
+    rewrite_note_links(root, mapping)
+
+
+def organization_journal_path(root: Path) -> Path:
+    return workspace_path(root, ORGANIZATION_JOURNAL, "organization recovery journal")
+
+
+def write_organization_journal(root: Path, mapping: dict[str, str], items: list[dict[str, str]]) -> Path:
+    path = organization_journal_path(root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "version": 1,
+        "kind": "organization_recovery",
+        "mapping": mapping,
+        "items": items,
+        "created_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+    }
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    os.replace(temporary, path)
+    return path
+
+
+def load_organization_journal(root: Path) -> dict | None:
+    path = organization_journal_path(root)
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise WorkflowError("invalid_organization_recovery", f"could not read organization recovery journal: {path}", str(exc)) from exc
+    mapping = payload.get("mapping") if isinstance(payload, dict) else None
+    items = payload.get("items") if isinstance(payload, dict) else None
+    if payload.get("kind") != "organization_recovery" or not isinstance(mapping, dict) or not all(
+        isinstance(old, str) and isinstance(new, str) for old, new in mapping.items()
+    ) or not isinstance(items, list) or not all(
+        isinstance(item, dict) and all(isinstance(item.get(key), str) for key in ("source", "target", "temporary"))
+        for item in items
+    ):
+        raise WorkflowError("invalid_organization_recovery", f"invalid organization recovery journal: {path}")
+    return payload
+
+
+def apply_organization_metadata(root: Path, reference_mapping: dict[str, str]) -> int:
+    mapping = {organization_key(old): new for old, new in reference_mapping.items()}
+    rewrite_bib_sources(root, mapping)
+    rewrite_source_registry(root, mapping)
+    rewrite_workspace_references(root, reference_mapping)
+    return len(write_index(root))
+
+
+def recover_pending_organization(root: Path) -> dict | None:
+    root = root.resolve()
+    payload = load_organization_journal(root)
+    if payload is None:
+        return None
+    completed_mapping: dict[str, str] = {}
+    restored = 0
+    temporary_paths: list[Path] = []
+    for item in payload["items"]:
+        source = workspace_path(root, item["source"], "organization recovery source")
+        target = workspace_path(root, item["target"], "organization recovery target")
+        temporary = workspace_path(root, item["temporary"], "organization recovery temporary file")
+        temporary_paths.append(temporary)
+        source_exists = source.exists()
+        target_exists = target.exists()
+        temporary_exists = temporary.exists()
+        if not source_exists and target_exists:
+            completed_mapping[item["source"]] = item["target"]
+            if temporary_exists:
+                temporary.unlink()
+            continue
+        if not source_exists and not target_exists and temporary_exists:
+            restore_staged_file(root, temporary, source)
+            restored += 1
+            continue
+        if source_exists and not target_exists and not temporary_exists:
+            continue
+        raise WorkflowError(
+            "organization_recovery_conflict",
+            "organization recovery found an ambiguous source/target/temporary state",
+            {"source": item["source"], "target": item["target"], "temporary": item["temporary"]},
+        )
+    index_entries = apply_organization_metadata(root, completed_mapping) if completed_mapping else len(write_index(root))
+    organization_journal_path(root).unlink()
+    staging_dirs = {path.parent for path in temporary_paths}
+    for staging in staging_dirs:
+        if staging.exists() and not any(staging.iterdir()):
+            staging.rmdir()
+    return {"recovered": len(completed_mapping), "restored": restored, "index_entries": index_entries}
+
+
+@contextmanager
+def secure_workspace_parent(root: Path, target: Path, label: str):
+    """Open a writable target parent through no-follow directory descriptors."""
+    root = root.resolve()
+    resolved_target = workspace_path(root, target, label)
+    relative = resolved_target.relative_to(root)
+    if len(relative.parts) < 1:
+        raise WorkflowError("workspace_path_escape", f"{label} must name a file inside the workspace")
+    required_flags = ("O_DIRECTORY", "O_NOFOLLOW")
+    if any(not hasattr(os, flag) for flag in required_flags):
+        raise WorkflowError("secure_path_operation_unavailable", "secure local file operations require O_DIRECTORY and O_NOFOLLOW")
+    directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    descriptor = os.open(root, directory_flags)
+    try:
+        for component in relative.parts[:-1]:
+            try:
+                child = os.open(component, directory_flags, dir_fd=descriptor)
+            except FileNotFoundError:
+                os.mkdir(component, dir_fd=descriptor)
+                child = os.open(component, directory_flags, dir_fd=descriptor)
+            os.close(descriptor)
+            descriptor = child
+        yield descriptor, relative.name
+    finally:
+        os.close(descriptor)
+
+
+def file_identity(root: Path, path: Path) -> tuple[int, int]:
+    with secure_workspace_parent(root, path, "managed file") as (parent_fd, name):
+        metadata = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+    if not stat.S_ISREG(metadata.st_mode):
+        raise WorkflowError("unsafe_target_path", f"managed target is not a regular file: {path}")
+    return metadata.st_dev, metadata.st_ino
+
+
+def has_file_identity(root: Path, path: Path, identity: tuple[int, int]) -> bool:
+    try:
+        return file_identity(root, path) == identity
+    except (OSError, WorkflowError):
+        return False
+
+
+def unlink_workspace_file(root: Path, path: Path, identity: tuple[int, int] | None = None) -> None:
+    with secure_workspace_parent(root, path, "managed file") as (parent_fd, name):
+        if identity is not None:
+            metadata = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+            if not stat.S_ISREG(metadata.st_mode) or (metadata.st_dev, metadata.st_ino) != identity:
+                return
+        os.unlink(name, dir_fd=parent_fd)
+
+
+def place_file_without_overwrite(root: Path, source: Path, target: Path) -> tuple[int, int]:
+    """Create a target from a staged regular file without replacing another writer's file."""
+    with secure_workspace_parent(root, target, "organization target") as (parent_fd, name):
+        try:
+            os.link(source, name, dst_dir_fd=parent_fd, follow_symlinks=False)
+        except FileExistsError as exc:
+            raise WorkflowError("target_conflict", f"organization target already exists: {target}") from exc
+        except OSError as exc:
+            unsupported = {errno.EXDEV, errno.EPERM, errno.EOPNOTSUPP}
+            if exc.errno not in unsupported:
+                raise WorkflowError("organization_move_failed", f"could not stage organization target: {target}", str(exc)) from exc
+            copied_identity: tuple[int, int] | None = None
+            try:
+                flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+                copied_fd = os.open(name, flags, 0o600, dir_fd=parent_fd)
+                with source.open("rb") as original, os.fdopen(copied_fd, "wb") as copied:
+                    metadata = os.fstat(copied.fileno())
+                    copied_identity = metadata.st_dev, metadata.st_ino
+                    shutil.copyfileobj(original, copied)
+                    copied.flush()
+                    os.fsync(copied.fileno())
+            except FileExistsError as copy_exc:
+                raise WorkflowError("target_conflict", f"organization target already exists: {target}") from copy_exc
+            except OSError as copy_exc:
+                if copied_identity is not None:
+                    metadata = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+                    if stat.S_ISREG(metadata.st_mode) and (metadata.st_dev, metadata.st_ino) == copied_identity:
+                        os.unlink(name, dir_fd=parent_fd)
+                raise WorkflowError("organization_move_failed", f"could not stage organization target: {target}", str(copy_exc)) from copy_exc
+        metadata = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise WorkflowError("unsafe_target_path", f"organization target is not a regular file: {target}")
+        return metadata.st_dev, metadata.st_ino
+
+
+def move_file_without_overwrite(root: Path, source: Path, target: Path) -> tuple[int, int]:
+    """Move a staged regular file while preserving a concurrently created target."""
+    identity = place_file_without_overwrite(root, source, target)
+    try:
+        source.unlink()
+    except OSError as exc:
+        if has_file_identity(root, target, identity):
+            unlink_workspace_file(root, target, identity)
+        raise WorkflowError("organization_move_failed", f"could not remove staged file: {source}", str(exc)) from exc
+    return identity
+
+
+def restore_staged_file(root: Path, temporary: Path, source: Path) -> None:
+    if not temporary.exists():
+        return
+    try:
+        move_file_without_overwrite(root, temporary, source)
+        return
+    except WorkflowError as exc:
+        if exc.code != "target_conflict":
+            raise
+    for suffix in range(1, 1000):
+        recovered = source.with_name(f"{source.stem}_recovered_{suffix}{source.suffix}")
+        try:
+            move_file_without_overwrite(root, temporary, recovered)
+            return
+        except WorkflowError as exc:
+            if exc.code != "target_conflict":
+                raise
+    raise WorkflowError("organization_rollback_incomplete", f"could not restore staged PDF: {temporary}")
+
+
 def apply_organization(root: Path, planned: list[dict]) -> dict:
+    root = root.resolve()
     active = [item for item in planned if item["changed"]]
     mapping = {organization_key(item["source"]): item["target"] for item in active}
     reference_mapping = {item["source"]: item["target"] for item in active}
     if not active:
         return {"moved": 0, "mapping": {}, "plan": planned}
 
-    staging = Path(tempfile.mkdtemp(prefix=".literature-workflow-", dir=root))
+    actions: list[tuple[Path, Path]] = []
+    for item in active:
+        source_lexical = root / item["source"]
+        if source_lexical.is_symlink():
+            raise WorkflowError("unsafe_source_path", f"refusing to organize symlinked PDF: {item['source']}")
+        source = workspace_path(root, source_lexical, "PDF source")
+        target = workspace_path(root, root / item["target"], "organization target")
+        if not source.exists() or not source.is_file():
+            raise WorkflowError("source_missing", f"planned PDF no longer exists: {item['source']}")
+        actions.append((source, target))
+
+    staging = workspace_path(root, Path(tempfile.mkdtemp(prefix=".literature-workflow-", dir=root)), "staging directory")
+    planned_staged = [(staging / f"{idx:04d}.pdf", source, target) for idx, (source, target) in enumerate(actions)]
+    journal = write_organization_journal(
+        root,
+        reference_mapping,
+        [
+            {
+                "source": str(source.relative_to(root)),
+                "target": str(target.relative_to(root)),
+                "temporary": str(temporary.relative_to(root)),
+            }
+            for temporary, source, target in planned_staged
+        ],
+    )
     staged: list[tuple[Path, Path, Path]] = []
+    finalized: dict[Path, tuple[int, int]] = {}
     try:
-        for idx, item in enumerate(active):
-            source = root / item["source"]
-            temporary = staging / f"{idx:04d}.pdf"
+        for temporary, source, target in planned_staged:
             shutil.move(str(source), str(temporary))
-            staged.append((temporary, source, root / item["target"]))
+            staged.append((temporary, source, target))
         for temporary, source, target in staged:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(temporary), str(target))
-    except Exception:
+            finalized[target] = place_file_without_overwrite(root, temporary, target)
+    except Exception as original_error:
+        rollback_incomplete = False
         for temporary, source, target in reversed(staged):
             try:
-                if target.exists() and not source.exists():
-                    source.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.move(str(target), str(source))
-                elif temporary.exists() and not source.exists():
-                    source.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.move(str(temporary), str(source))
-            except OSError:
-                pass
+                identity = finalized.get(target)
+                if identity is not None:
+                    unlink_workspace_file(root, target, identity)
+                restore_staged_file(root, temporary, source)
+            except (OSError, WorkflowError):
+                rollback_incomplete = True
+        if rollback_incomplete or any(temporary.exists() for temporary, _, _ in staged):
+            raise WorkflowError(
+                "organization_rollback_incomplete",
+                f"organization rollback kept staged PDFs at: {staging}",
+                {"original_error": str(original_error), "staging": str(staging)},
+            ) from original_error
+        journal.unlink()
         raise
-    finally:
-        shutil.rmtree(staging, ignore_errors=True)
 
-    rewrite_bib_sources(root, mapping)
-    rewrite_source_registry(root, mapping)
-    rewrite_workspace_references(root, reference_mapping)
-    index = write_index(root)
-    return {"moved": len(active), "mapping": mapping, "plan": planned, "index_entries": len(index)}
+    try:
+        index_entries = apply_organization_metadata(root, reference_mapping)
+    except Exception as exc:
+        for temporary, _, _ in staged:
+            temporary.unlink(missing_ok=True)
+        raise WorkflowError(
+            "organization_metadata_pending",
+            "PDFs were moved, but metadata updates are pending recovery",
+            {"journal": str(journal.relative_to(root)), "error": str(exc)},
+        ) from exc
+    else:
+        journal.unlink()
+        for temporary, _, _ in staged:
+            temporary.unlink(missing_ok=True)
+        return {"moved": len(active), "mapping": mapping, "plan": planned, "index_entries": index_entries}
+    finally:
+        if not any(temporary.exists() for temporary, _, _ in staged):
+            shutil.rmtree(staging, ignore_errors=True)
 
 
 def is_pdf(path: Path) -> bool:
@@ -643,13 +971,162 @@ def resolve_add_source(source: str) -> tuple[str, str | None]:
     return str(Path(os.path.expanduser(source)).resolve()), None
 
 
-def download(url: str, target: Path) -> None:
+def is_public_download_address(address: str) -> bool:
+    ip = ipaddress.ip_address(address)
+    if any(
+        (
+            ip.is_private,
+            ip.is_loopback,
+            ip.is_link_local,
+            ip.is_multicast,
+            ip.is_unspecified,
+            ip.is_reserved,
+            getattr(ip, "is_site_local", False),
+        )
+    ):
+        return False
+    if ip.version == 6 and any(ip in network for network in WELL_KNOWN_NAT64_PREFIXES):
+        return False
+    return ip.is_global
+
+
+def validate_download_url(url: str) -> tuple[str, ...]:
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise WorkflowError("unsafe_download_url", "download URL must be an absolute HTTP(S) URL")
+    if parsed.username or parsed.password:
+        raise WorkflowError("unsafe_download_url", "download URL must not contain credentials")
+    try:
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        addresses = socket.getaddrinfo(parsed.hostname, port, type=socket.SOCK_STREAM)
+    except (OSError, ValueError) as exc:
+        raise WorkflowError("download_host_unavailable", f"could not resolve download host: {parsed.hostname}") from exc
+    resolved = tuple(dict.fromkeys(entry[4][0] for entry in addresses))
+    if not resolved:
+        raise WorkflowError("download_host_unavailable", f"could not resolve download host: {parsed.hostname}")
+    for address in resolved:
+        try:
+            if not is_public_download_address(address):
+                raise WorkflowError("unsafe_download_url", "download host must resolve only to public IP addresses")
+        except ValueError as exc:
+            raise WorkflowError("download_host_unavailable", f"download host returned an invalid address: {address}") from exc
+    return resolved
+
+
+class RejectRedirects(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[no-untyped-def]
+        raise WorkflowError("download_redirect_blocked", "download URL redirected; use its final public PDF URL instead")
+
+
+class PinnedHTTPConnection(http.client.HTTPConnection):
+    def __init__(self, host: str, *, address: str, **kwargs: object) -> None:
+        self._pinned_address = address
+        super().__init__(host, **kwargs)
+
+    def connect(self) -> None:
+        self.sock = socket.create_connection((self._pinned_address, self.port), self.timeout, self.source_address)
+
+
+class PinnedHTTPSConnection(http.client.HTTPSConnection):
+    def __init__(self, host: str, *, address: str, **kwargs: object) -> None:
+        self._pinned_address = address
+        super().__init__(host, **kwargs)
+
+    def connect(self) -> None:
+        sock = socket.create_connection((self._pinned_address, self.port), self.timeout, self.source_address)
+        if self._tunnel_host:
+            self.sock = sock
+            self._tunnel()
+            server_hostname = self._tunnel_host
+        else:
+            server_hostname = self.host
+        self.sock = self._context.wrap_socket(sock, server_hostname=server_hostname)
+
+
+class PinnedHTTPHandler(HTTPHandler):
+    def __init__(self, address: str) -> None:
+        super().__init__()
+        self._pinned_address = address
+
+    def http_open(self, request: Request):  # type: ignore[no-untyped-def]
+        return self.do_open(
+            lambda host, **kwargs: PinnedHTTPConnection(host, address=self._pinned_address, **kwargs),
+            request,
+        )
+
+
+class PinnedHTTPSHandler(HTTPSHandler):
+    def __init__(self, address: str) -> None:
+        super().__init__()
+        self._pinned_address = address
+
+    def https_open(self, request: Request):  # type: ignore[no-untyped-def]
+        return self.do_open(
+            lambda host, **kwargs: PinnedHTTPSConnection(host, address=self._pinned_address, **kwargs),
+            request,
+            context=self._context,
+        )
+
+
+def download(root: Path, url: str, target: Path) -> None:
+    addresses = validate_download_url(url)
     request = Request(url, headers={"User-Agent": "literature-workflow-skill/1.0"})
-    with urlopen(request, timeout=60) as response:
-        target.write_bytes(response.read())
+    # Disable environment proxies and connect only to the DNS result just vetted above.
+    opener = build_opener(
+        ProxyHandler({}),
+        RejectRedirects(),
+        PinnedHTTPHandler(addresses[0]),
+        PinnedHTTPSHandler(addresses[0]),
+    )
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary_name = tempfile.mkstemp(prefix=".literature-download-", suffix=".pdf", dir=target.parent)
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(fd, "wb") as destination, opener.open(request, timeout=60) as response:
+            content_length = response.headers.get("Content-Length")
+            try:
+                declared_size = int(content_length) if content_length else None
+            except ValueError:
+                declared_size = None
+            if declared_size is not None and declared_size > MAX_DOWNLOAD_BYTES:
+                raise WorkflowError("download_too_large", f"PDF exceeds {MAX_DOWNLOAD_BYTES // (1024 * 1024)} MiB limit")
+            total = 0
+            while chunk := response.read(1024 * 1024):
+                total += len(chunk)
+                if total > MAX_DOWNLOAD_BYTES:
+                    raise WorkflowError("download_too_large", f"PDF exceeds {MAX_DOWNLOAD_BYTES // (1024 * 1024)} MiB limit")
+                destination.write(chunk)
+        if not is_pdf(temporary):
+            raise WorkflowError("download_not_pdf", "downloaded content is not a valid PDF")
+        move_file_without_overwrite(root, temporary, target)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def copy_file_without_overwrite(root: Path, source: Path, target: Path) -> None:
+    with secure_workspace_parent(root, target, "import target") as (parent_fd, name):
+        copied_identity: tuple[int, int] | None = None
+        try:
+            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+            copied_fd = os.open(name, flags, 0o600, dir_fd=parent_fd)
+            with source.open("rb") as original, os.fdopen(copied_fd, "wb") as copied:
+                metadata = os.fstat(copied.fileno())
+                copied_identity = metadata.st_dev, metadata.st_ino
+                shutil.copyfileobj(original, copied)
+                copied.flush()
+                os.fsync(copied.fileno())
+        except FileExistsError as exc:
+            raise WorkflowError("target_conflict", f"import target already exists: {target}") from exc
+        except OSError as exc:
+            if copied_identity is not None:
+                metadata = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+                if stat.S_ISREG(metadata.st_mode) and (metadata.st_dev, metadata.st_ino) == copied_identity:
+                    os.unlink(name, dir_fd=parent_fd)
+            raise WorkflowError("local_import_failed", f"could not copy PDF into workspace: {target}", str(exc)) from exc
 
 
 def add_pdf(root: Path, source: str, name: str | None = None) -> Path:
+    root = root.resolve()
     ensure_root(root)
     resolved, inferred_name = resolve_add_source(source)
     parsed = urlparse(resolved)
@@ -669,17 +1146,22 @@ def add_pdf(root: Path, source: str, name: str | None = None) -> Path:
             pass
 
     filename = normalize_pdf_name(name or inferred_name or Path(resolved).name)
-    target = unique_path(root / filename)
+    target = unique_path(workspace_path(root, filename, "download destination"))
 
     if parsed.scheme in {"http", "https"}:
         try:
-            download(resolved, target)
+            download(root, resolved, target)
+        except WorkflowError:
+            raise
         except Exception as exc:
             raise WorkflowError("download_failed", f"failed to download PDF: {resolved}", str(exc)) from exc
     else:
         import shutil
 
-        shutil.copy2(Path(resolved), target)
+        try:
+            copy_file_without_overwrite(root, Path(resolved), target)
+        except WorkflowError:
+            raise
 
     if not is_pdf(target):
         target.unlink(missing_ok=True)
@@ -688,7 +1170,7 @@ def add_pdf(root: Path, source: str, name: str | None = None) -> Path:
 
 
 def source_registry_path(root: Path) -> Path:
-    return root / SOURCE_REGISTRY
+    return workspace_path(root, SOURCE_REGISTRY, "source registry")
 
 
 def load_source_records(root: Path) -> list[dict]:
@@ -728,8 +1210,9 @@ def setup_workspace(root: Path) -> dict:
     else:
         root.mkdir(parents=True, exist_ok=True)
         created.append(".")
+    root = root.resolve()
     for dirname in WORKSPACE_DIRS:
-        path = root / dirname
+        path = workspace_path(root, dirname, "workspace directory")
         if path.exists():
             preserved.append(dirname)
         else:
@@ -743,7 +1226,7 @@ def setup_workspace(root: Path) -> dict:
         source_path.write_text("", encoding="utf-8")
         created.append(str(SOURCE_REGISTRY))
 
-    rules_path = root / ORGANIZATION_RULES
+    rules_path = workspace_path(root, ORGANIZATION_RULES, "organization rules")
     if rules_path.exists():
         preserved.append(str(ORGANIZATION_RULES))
     else:
@@ -1000,11 +1483,12 @@ def move_survey_source_document(root: Path, path: Path) -> Path:
         path.relative_to(root)
     except ValueError as exc:
         raise WorkflowError("source_outside_workspace", "only source documents inside the workspace can be managed by moving") from exc
-    if path.is_relative_to(root / SURVEY_SOURCES_DIR):
+    managed_sources = workspace_path(root, SURVEY_SOURCES_DIR, "survey source directory")
+    if path.is_relative_to(managed_sources):
         return path
-    target_dir = root / SURVEY_SOURCES_DIR
+    target_dir = managed_sources
     target_dir.mkdir(parents=True, exist_ok=True)
-    target = unique_path(target_dir / path.name)
+    target = unique_path(workspace_path(root, target_dir / path.name, "survey source destination"))
     old_source = make_source(root, str(path), infer_source_type(str(path)), role="reference")
     try:
         shutil.move(str(path), str(target))
@@ -1025,7 +1509,7 @@ def survey_slug(title: str) -> str:
 
 
 def survey_manifest_paths(root: Path) -> list[Path]:
-    directory = root / SURVEYS_DIR
+    directory = workspace_path(root, SURVEYS_DIR, "surveys directory")
     if not directory.exists():
         return []
     return sorted(path for path in directory.glob(f"*/{SURVEY_MANIFEST}") if path.is_file())
@@ -1049,7 +1533,7 @@ def resolve_survey_manifest(root: Path, query: str) -> Path:
     candidate_name = Path(query).name
     if candidate_name != query or candidate_name in {".", ".."}:
         raise WorkflowError("invalid_survey_query", "survey query must be a title or one survey directory name")
-    direct = root / SURVEYS_DIR / candidate_name / SURVEY_MANIFEST
+    direct = workspace_path(root, SURVEYS_DIR / candidate_name / SURVEY_MANIFEST, "survey manifest")
     if direct.exists():
         return direct
 
@@ -1146,10 +1630,11 @@ def render_survey_reading_pack(root: Path, manifest_path: Path, manifest: dict) 
 
 
 def write_survey_manifest(root: Path, directory: Path, manifest: dict) -> dict:
+    directory = workspace_path(root, directory, "survey directory")
     directory.mkdir(parents=True, exist_ok=True)
-    manifest_path = directory / SURVEY_MANIFEST
+    manifest_path = workspace_path(root, directory / SURVEY_MANIFEST, "survey manifest")
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    pack_path = directory / SURVEY_READING_PACK
+    pack_path = workspace_path(root, directory / SURVEY_READING_PACK, "survey reading pack")
     pack_path.write_text(render_survey_reading_pack(root, manifest_path, manifest), encoding="utf-8")
     return {
         "manifest": str(manifest_path.relative_to(root)),
@@ -1195,8 +1680,8 @@ def refresh_survey_document(root: Path, previous: dict, records: list[dict]) -> 
 
 def create_or_update_survey(root: Path, title: str, scope: str, papers: list[str], sources: list[str], update: bool) -> dict:
     slug = survey_slug(title)
-    directory = root / SURVEYS_DIR / slug
-    manifest_path = directory / SURVEY_MANIFEST
+    directory = workspace_path(root, SURVEYS_DIR / slug, "survey directory")
+    manifest_path = workspace_path(root, directory / SURVEY_MANIFEST, "survey manifest")
     existing = load_survey_manifest(manifest_path) if manifest_path.exists() else None
     if existing is None and directory.exists():
         raise WorkflowError("survey_path_conflict", f"survey directory already exists without a manifest: {directory.relative_to(root)}")
@@ -1631,29 +2116,37 @@ def render_page(root: Path, query: str, page: int, output: Path | None, dpi: str
     title = match.get("title") if match else pdf_path.stem
     if output is None:
         stem = Path(note_filename(title)).stem
-        output = root / "notes/assets" / f"{stem}_page{page}.png"
-    elif not output.is_absolute():
-        output = root / output
-    output.parent.mkdir(parents=True, exist_ok=True)
-
-    status = renderer_status()
-    if status["ghostscript"]:
-        renderer = "ghostscript"
-        render_page_with_ghostscript(pdf_path, output, page, resolved_dpi)
-    elif status["pymupdf"]:
-        renderer = "pymupdf"
-        render_page_with_pymupdf(pdf_path, output, page, resolved_dpi)
-    elif status["pdftoppm"]:
-        renderer = "pdftoppm"
-        render_page_with_pdftoppm(pdf_path, output, page, resolved_dpi)
+        output = workspace_path(root, Path("notes/assets") / f"{stem}_page{page}.png", "render output")
     else:
-        raise WorkflowError(
-            "pdf_renderer_missing",
-            "no PDF renderer available; install Ghostscript, PyMuPDF, or Poppler pdftoppm, or omit the screenshot",
-            status,
-        )
-    if crop:
-        crop_image(output, scale_crop(crop, crop_scale))
+        output = workspace_path(root, output, "render output")
+    output = unique_path(output)
+    temporary_fd, temporary_name = tempfile.mkstemp(prefix=".literature-render-", suffix=".png", dir=root)
+    os.close(temporary_fd)
+    temporary = Path(temporary_name)
+    temporary.unlink()
+
+    try:
+        status = renderer_status()
+        if status["ghostscript"]:
+            renderer = "ghostscript"
+            render_page_with_ghostscript(pdf_path, temporary, page, resolved_dpi)
+        elif status["pymupdf"]:
+            renderer = "pymupdf"
+            render_page_with_pymupdf(pdf_path, temporary, page, resolved_dpi)
+        elif status["pdftoppm"]:
+            renderer = "pdftoppm"
+            render_page_with_pdftoppm(pdf_path, temporary, page, resolved_dpi)
+        else:
+            raise WorkflowError(
+                "pdf_renderer_missing",
+                "no PDF renderer available; install Ghostscript, PyMuPDF, or Poppler pdftoppm, or omit the screenshot",
+                status,
+            )
+        if crop:
+            crop_image(temporary, scale_crop(crop, crop_scale))
+        move_file_without_overwrite(root, temporary, output)
+    finally:
+        temporary.unlink(missing_ok=True)
     return {
         "output": str(output.relative_to(root) if output.is_relative_to(root) else output),
         "paper": str(pdf_path.relative_to(root) if pdf_path.is_relative_to(root) else pdf_path),
@@ -1993,6 +2486,8 @@ def main() -> int:
     args = parser.parse_args()
     args.root = args.root.resolve()
     try:
+        if args.cmd != "setup":
+            recover_pending_organization(args.root)
         return args.func(args)
     except Exception as exc:
         return handle_error(exc)

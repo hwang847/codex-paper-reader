@@ -52,10 +52,12 @@ Generate `AGENTS.md` as a compact local contract for Codex. It should usually in
 
 Keep it short. Remove motivational prose, examples that only belong in README, and anything the skill already covers.
 
+Treat the managed workspace as single-writer while a workflow command runs. Do not run organization, indexing, or rendering while another process or sync client is renaming managed directories.
+
 If `AGENTS.md` already exists, read it first and update it conservatively. Preserve stable user preferences. Do not overwrite unrelated local runtime imports. When the user later changes a durable preference, update `AGENTS.md` again instead of leaving the workspace rules stale.
 
 ## Survey Sources and Lark
 
 When a user has an existing survey or literature map, register it through `survey source add`. It may be moved into `surveys/sources/` only with an explicit request; never modify its content. Generate survey prose only when explicitly requested.
 
-When a user asks to use Feishu/Lark, let Codex check/install the official `lark-cli`, guide the required authentication, and ask for a concrete cloud destination. Cloud writes are never part of ordinary workspace setup.
+When a user asks to use Feishu/Lark, let Codex check the official `lark-cli`; if it is missing, state the exact install command and obtain explicit approval before installing. Then guide the required authentication and ask for a concrete cloud destination. Cloud writes are never part of ordinary workspace setup.
