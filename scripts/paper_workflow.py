@@ -23,7 +23,7 @@ from pathlib import Path
 from urllib.parse import urlparse, urlunparse
 from urllib.request import HTTPHandler, HTTPRedirectHandler, HTTPSHandler, ProxyHandler, Request, build_opener
 
-from build_paper_index import build_index, extract_pdf_title
+from build_paper_index import build_index, extract_pdf_title, workspace_pdfs
 from find_paper import index_is_stale, score
 
 
@@ -2068,7 +2068,7 @@ def scale_crop(crop: str, scale: float) -> str:
     return ",".join(str(value) for value in scaled)
 
 
-def auto_render_dpi(pdf_path: Path, page: int, crop: str | None) -> int:
+def auto_render_dpi(crop: str | None) -> int:
     base_dpi = 180
     max_dpi = 360
     if crop:
@@ -2085,9 +2085,9 @@ def auto_render_dpi(pdf_path: Path, page: int, crop: str | None) -> int:
     return 240
 
 
-def parse_dpi(pdf_path: Path, page: int, dpi: str, crop: str | None) -> tuple[int, float, bool]:
+def parse_dpi(dpi: str, crop: str | None) -> tuple[int, float, bool]:
     if dpi == "auto":
-        resolved = auto_render_dpi(pdf_path, page, crop)
+        resolved = auto_render_dpi(crop)
         return resolved, resolved / 180, True
     try:
         resolved = int(dpi)
@@ -2112,7 +2112,7 @@ def render_page(root: Path, query: str, page: int, output: Path | None, dpi: str
     if page < 1:
         raise WorkflowError("invalid_page", "page must be >= 1")
     pdf_path, match = resolve_pdf(root, query)
-    resolved_dpi, crop_scale, dpi_auto = parse_dpi(pdf_path, page, dpi, crop)
+    resolved_dpi, crop_scale, dpi_auto = parse_dpi(dpi, crop)
     title = match.get("title") if match else pdf_path.stem
     if output is None:
         stem = Path(note_filename(title)).stem
@@ -2178,7 +2178,10 @@ def cmd_find(args: argparse.Namespace) -> int:
         for item in matches:
             kind = item.get("kind", "paper")
             print(f"{item['score']:.4f}\t{kind}\t{item_locator(item)}\t{item['title']}")
-    return 0 if matches else 1
+    if matches:
+        return 0
+    print(f"No local paper matched {args.query!r}. Check the copied title or import the PDF first.", file=sys.stderr)
+    return 1
 
 
 def cmd_add(args: argparse.Namespace) -> int:
@@ -2219,7 +2222,7 @@ def cmd_render_page(args: argparse.Namespace) -> int:
 def cmd_doctor(args: argparse.Namespace) -> int:
     ensure_root(args.root)
     text_extractors = text_extractor_status()
-    pdf_count = len(list((args.root / "papers").rglob("*.pdf"))) + len(list(args.root.glob("*.pdf")))
+    pdf_count = len(workspace_pdfs(args.root))
     index_path = args.root / "references/paper_index.jsonl"
     source_path = source_registry_path(args.root)
     status = {

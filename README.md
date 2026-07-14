@@ -38,7 +38,7 @@ Codex creates the workspace, checks available PDF tools, and writes a compact lo
 
 After setup, your everyday loop is simple:
 
-1. Put a new PDF in the workspace root. Names such as `2508.05002v1.pdf`, `2025.findings-naacl.245.pdf`, and `download.pdf` are all fine.
+1. Put a new PDF in the workspace root. Names such as `2508.05002v1.pdf`, `2025.findings-naacl.245.pdf`, `download.pdf`, or `Paper.PDF` are all fine.
 2. Open it in your normal PDF reader and copy its title.
 3. Paste the title into Codex:
 

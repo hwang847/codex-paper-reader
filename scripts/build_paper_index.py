@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 
 SOURCE_REGISTRY = Path("references/source_registry.jsonl")
 LOCAL_SOURCE_TYPES = {"pdf", "doc", "html", "text", "path"}
+PDF_GLOB = "*.[pP][dD][fF]"
 
 
 def clean_bib_value(value: str) -> str:
@@ -451,17 +452,47 @@ def extract_pdf_title(pdf_path: Path) -> str | None:
 
 def library_pdfs(root: Path) -> list[Path]:
     papers_dir = path_within_root(root, root / "papers", "papers directory")
-    paths = list(papers_dir.rglob("*.pdf")) if papers_dir.exists() else []
-    paths.extend(sorted(root.glob("*.pdf")))
+    candidates = list(papers_dir.rglob(PDF_GLOB)) if papers_dir.exists() else []
+    candidates.extend(root.glob(PDF_GLOB))
     safe_paths = []
-    for path in paths:
-        if path.is_symlink():
+    for path in candidates:
+        if path.is_symlink() or not path.is_file():
             continue
         try:
             safe_paths.append(path_within_root(root, path, "PDF path"))
         except ValueError:
             continue
     return sorted(set(safe_paths))
+
+
+def registered_workspace_pdfs(root: Path) -> list[Path]:
+    """Return regular workspace PDFs explicitly registered outside library folders."""
+    root = root.resolve()
+    paths: set[Path] = set()
+    for record in load_source_registry(root):
+        for source in record.get("sources", []):
+            if not isinstance(source, dict) or str(source.get("type", "")).lower() != "pdf":
+                continue
+            locator = str(source.get("locator", "")).strip()
+            if not locator or urlparse(locator).scheme in {"http", "https"}:
+                continue
+            lexical = Path(locator).expanduser()
+            if not lexical.is_absolute():
+                lexical = root / lexical
+            if lexical.is_symlink():
+                continue
+            try:
+                path = path_within_root(root, lexical, "registered PDF path")
+            except ValueError:
+                continue
+            if path.is_file():
+                paths.add(path)
+    return sorted(paths)
+
+
+def workspace_pdfs(root: Path) -> list[Path]:
+    """Return every safe local PDF that can appear in the generated index."""
+    return sorted({*library_pdfs(root), *registered_workspace_pdfs(root)})
 
 
 def pdf_map(root: Path) -> dict[str, Path]:

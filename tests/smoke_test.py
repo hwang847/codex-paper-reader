@@ -267,6 +267,7 @@ Results follow.
         assert setup["index_entries"] == 0
 
         (workspace / "2501.00001v1.pdf").write_bytes(b"%PDF-1.4\n% smoke test placeholder\n")
+        (workspace / "UPPER.PDF").write_bytes(b"%PDF-1.4\n% uppercase extension\n")
 
         outside_pdf = Path(tmp) / "outside.pdf"
         outside_pdf_bytes = b"%PDF-1.4\n% outside workspace\n"
@@ -300,6 +301,51 @@ Results follow.
         matches = json.loads(found)
         assert matches, "expected a PDF match"
         assert matches[0]["path"] == "2501.00001v1.pdf"
+        uppercase_matches = json.loads(run("--root", str(workspace), "find", "UPPER", "--json").stdout)
+        assert uppercase_matches and uppercase_matches[0]["path"] == "UPPER.PDF"
+        preserved_timestamp_pdf = workspace / "ARCHIVED.PDF"
+        preserved_timestamp_pdf.write_bytes(b"%PDF-1.4\n% copied with an old timestamp\n")
+        index_mtime = (workspace / "references" / "paper_index.jsonl").stat().st_mtime
+        os.utime(preserved_timestamp_pdf, (index_mtime - 60, index_mtime - 60))
+        preserved_timestamp_matches = json.loads(run("--root", str(workspace), "find", "ARCHIVED", "--json").stdout)
+        assert preserved_timestamp_matches and preserved_timestamp_matches[0]["path"] == "ARCHIVED.PDF"
+        doctor = json.loads(run("--root", str(workspace), "doctor").stdout)
+        assert doctor["pdf_count"] == 3
+        preserved_timestamp_pdf.unlink()
+        removed_pdf = subprocess.run(
+            [sys.executable, "-B", str(TOOL), "--root", str(workspace), "find", "ARCHIVED"],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        assert removed_pdf.returncode == 1
+        assert "No local paper matched" in removed_pdf.stderr
+        no_match = subprocess.run(
+            [sys.executable, "-B", str(TOOL), "--root", str(workspace), "find", "Missing Local Paper"],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        assert no_match.returncode == 1
+        assert "Check the copied title or import the PDF first" in no_match.stderr
+
+        index_path = workspace / "references" / "paper_index.jsonl"
+        previous_index_time = index_path.stat().st_mtime - 60
+        os.utime(index_path, (previous_index_time, previous_index_time))
+        rules_path = workspace / "references" / "organization_rules.json"
+        rules = json.loads(rules_path.read_text(encoding="utf-8"))
+        rules["title_overrides"] = {"UPPER.PDF": "Override-Aware Paper"}
+        rules_path.write_text(json.dumps(rules), encoding="utf-8")
+        direct_override = subprocess.run(
+            [sys.executable, "-B", str(ROOT / "scripts" / "find_paper.py"), "Override-Aware Paper", "--root", str(workspace)],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        assert direct_override.returncode == 0
+        assert "Override-Aware Paper" in direct_override.stdout
+        override_matches = json.loads(run("--root", str(workspace), "find", "Override-Aware Paper", "--json").stdout)
+        assert override_matches and override_matches[0]["title"] == "Override-Aware Paper"
 
         escaped_index = Path(tmp) / "escaped_index.jsonl"
         rejected_output = subprocess.run(
@@ -723,6 +769,24 @@ Results follow.
         assert not (interrupted_workspace / "references" / "organization_recovery.json").exists()
         assert not interrupted_staging.exists()
 
+        registered_pdf = workspace / "notes" / "attached.PDF"
+        registered_pdf.write_bytes(b"%PDF-1.4\n% registered source outside the library folders\n")
+        run(
+            "--root",
+            str(workspace),
+            "source",
+            "add",
+            "--kind",
+            "paper",
+            "--title",
+            "Registered Local PDF",
+            "--pdf",
+            "notes/attached.PDF",
+        )
+        registered_matches = json.loads(run("--root", str(workspace), "find", "Registered Local PDF", "--json").stdout)
+        assert registered_matches and registered_matches[0]["path"] == "notes/attached.PDF"
+        assert json.loads(run("--root", str(workspace), "doctor").stdout)["index_stale"] is False
+
         invalid_rules = Path(tmp) / "invalid_rules.json"
         invalid_rules.write_text(
             json.dumps({"categories": [{"name": "../escape", "keywords": []}]}),
@@ -758,6 +822,14 @@ Results follow.
         items = json.loads(shown)
         assert items and items[0]["kind"] == "tech_doc"
         assert items[0]["source_count"] == 2
+        direct_find = subprocess.run(
+            [sys.executable, "-B", str(ROOT / "scripts" / "find_paper.py"), "ESD", "--root", str(workspace)],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        assert direct_find.returncode == 0
+        assert "https://example.com/docs" in direct_find.stdout
 
     print("smoke test passed")
     return 0

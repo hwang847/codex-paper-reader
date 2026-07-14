@@ -38,7 +38,7 @@ Codex 会创建工作区、检查本地 PDF 能力，并根据你的偏好写出
 
 工作区配置后，日常流程只有三步：
 
-1. 把新 PDF 放在工作区根目录。`2508.05002v1.pdf`、`2025.findings-naacl.245.pdf`、`download.pdf` 都可以。
+1. 把新 PDF 放在工作区根目录。`2508.05002v1.pdf`、`2025.findings-naacl.245.pdf`、`download.pdf`、`Paper.PDF` 都可以。
 2. 用你平常的阅读器打开它，复制论文标题。
 3. 对 Codex 说：
 
