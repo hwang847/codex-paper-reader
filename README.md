@@ -19,14 +19,22 @@ You do not need to make folders, rename numbered downloads, build an index, or e
 
 Requires Python 3.9 or later. Optional PDF text/rendering tools are checked by Codex during setup.
 
-Install the skill:
+The easiest installation is to give Codex the [repository link](https://github.com/hwang847/codex-paper-reader.git) and say:
+
+```text
+Install or update the Codex skill from https://github.com/hwang847/codex-paper-reader.git as literature-workflow. Check for an existing installation first, preserve local changes, validate SKILL.md, and tell me when it is ready.
+```
+
+Codex can place and validate the skill for you. If you prefer a terminal, install it manually:
 
 ```bash
 mkdir -p ~/.codex/skills
 git clone https://github.com/hwang847/codex-paper-reader.git ~/.codex/skills/literature-workflow
 ```
 
-Restart Codex App or open a new Codex CLI session. Then open your chosen paper folder, or `cd` into it, and say:
+`mkdir -p` only ensures that the parent skill directory exists; it is harmless when the directory is already present. An installed skill is normally available on the next Codex turn. If the current task does not detect it, open a new Codex App task or a new CLI session.
+
+Then open your chosen paper folder, or `cd` into it, and say:
 
 ```text
 Use $literature-workflow to set up this literature workspace.

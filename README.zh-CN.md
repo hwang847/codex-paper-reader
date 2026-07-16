@@ -19,14 +19,22 @@
 
 需要 Python 3.9 或更高版本。可选的 PDF 文本/渲染能力会在配置时由 Codex 自动检查。
 
-安装：
+最简单的安装方式，是把[仓库链接](https://github.com/hwang847/codex-paper-reader.git)直接交给 Codex，并告诉它：
+
+```text
+请从 https://github.com/hwang847/codex-paper-reader.git 安装或更新名为 literature-workflow 的 Codex Skill。先检查现有安装并保留本地修改，验证 SKILL.md 后告诉我何时可以使用。
+```
+
+Codex 会代你放置并验证 Skill。也可以选择在终端手动安装：
 
 ```bash
 mkdir -p ~/.codex/skills
 git clone https://github.com/hwang847/codex-paper-reader.git ~/.codex/skills/literature-workflow
 ```
 
-重启 Codex App，或开启新的 Codex CLI 会话。打开你想作为论文库的文件夹，或者在终端 `cd` 到这个文件夹，然后对 Codex 说：
+`mkdir -p` 只是确保 Skill 的父目录存在；目录已经存在时不会产生影响。安装后的 Skill 通常会在 Codex 的下一轮对话可用；如果当前任务没有识别到它，新建一个 Codex App 任务或开启新的 CLI 会话即可。
+
+打开你想作为论文库的文件夹，或者在终端 `cd` 到这个文件夹，然后对 Codex 说：
 
 ```text
 使用 $literature-workflow，帮我配置这个论文阅读工作区。

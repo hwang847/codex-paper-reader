@@ -2,6 +2,14 @@
 
 [中文](CHANGELOG.zh-CN.md)
 
+## 2026-07-16
+
+### Easier installation and standards review
+
+- Added a Codex-first installation path: users can give Codex the GitHub repository link and ask it to install or update the skill safely.
+- Kept the manual `git clone` path as an explicit fallback and clarified when a newly installed skill becomes available.
+- Revalidated the package against the Codex Skill structure, metadata, progressive-disclosure, smoke-test, syntax, and privacy requirements.
+
 ## 2026-07-14
 
 ### Survey and Feishu/Lark workflow
