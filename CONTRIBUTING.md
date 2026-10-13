@@ -8,7 +8,7 @@ The shared skill defines evidence and file-handling contracts, not a research sc
 - Categories and title corrections: edit workspace `references/organization_rules.json`.
 - A reusable specialist workflow: add a focused reference linked from `SKILL.md`.
 - A repeatable file operation: extend the existing Python CLI and add a behavior test.
-- A new external service: add an optional handoff reference; keep authentication and network tools with the host.
+- A new external service: follow [work connectors](references/work_connectors.md); let the host choose a CLI and keep setup records in the user's workspace. Add shared code only for a demonstrated reusable need.
 
 No plugin framework or model-specific wrapper is required. Do not store personal paths, credentials, source PDFs, or private research notes in this repository.
 

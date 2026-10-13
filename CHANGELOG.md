@@ -2,6 +2,12 @@
 
 [中文](CHANGELOG.zh-CN.md)
 
+## 2026-10-13: Optional Work Connectors
+
+- Kept reading, sources, notes, and surveys as the core; moved Feishu/Lark to an example of optional work connectors in all five READMEs.
+- Replaced the provider-specific guide with on-demand GitHub CLI discovery, authorized installation, and workspace-local setup records. No new runtime, automatic installation, or cloud connection.
+- Preserved scoped publishing and credential boundaries while leaving tool choice and customization with the host agent.
+
 ## 2026-10-13: Leaner Literature Workflow
 
 - Reduced the always-loaded skill to task boundaries, evidence handling, and source continuity. Setup, commands, surveys, and Feishu publishing are on-demand references.

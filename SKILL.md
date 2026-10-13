@@ -1,6 +1,6 @@
 ---
 name: literature-workflow
-description: "Read and discuss local papers, find PDFs from copied titles, organize literature sources, and create discussion-based notes or scoped surveys. Includes optional Feishu/Lark artifact publishing, not general chat or bot administration."
+description: "Read and discuss local papers, find PDFs from copied titles, organize literature sources, and create discussion-based notes or scoped surveys."
 ---
 
 # Literature Workflow
@@ -9,7 +9,7 @@ Help the user understand sources and preserve what matters to their research. Ad
 
 ## Scope
 
-- Cover paper lookup, reading, source management, notes, and scoped literature reviews. Publishing selected artifacts is an optional handoff.
+- Cover paper lookup, reading, source management, notes, and scoped literature reviews. External work connectors are optional extensions, configured on demand.
 - The host agent handles reasoning, writing, environment setup, and other tools. This skill supplies source continuity and repeatable file operations. It does not run a PDF viewer, background watcher, autonomous research service, or chat bot.
 - Use the user's paper folder as the workspace, not the installed skill directory. Read its existing `AGENTS.md`; keep personal preferences there, outside the shared skill.
 
@@ -40,6 +40,6 @@ python3 <skill-dir>/scripts/paper_workflow.py --root <workspace> --help
 - [Commands](references/commands.md): lookup, page text, figures, filing, and source records.
 - [Workspace setup](references/workspace_setup.md): initialize or personalize a library.
 - [Survey](references/survey_workflow.md): maintain a selected source set for synthesis.
-- [Feishu/Lark](references/lark_handoff.md): publish selected artifacts to an exact destination.
+- [Work connectors](references/work_connectors.md): find suitable CLIs on GitHub and manage requested integrations in the workspace.
 
 Python helpers need Python 3.9+. PDF extraction and rendering are optional dependencies; check `doctor` when needed. Preserve existing command interfaces and workspace formats when customizing. Keep extensions in focused references or tools, loaded only for the relevant task.

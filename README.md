@@ -45,7 +45,6 @@ Codex finds the corresponding local PDF through the title index. You do not need
 | “Organize these new papers.” | Preview title-based renaming and category folders, then file PDFs without overwriting duplicates or breaking managed links. |
 | “This code repository belongs to that paper.” | Connect PDF, arXiv, DOI, code, and documentation as sources of one reading target. |
 | “Compare these papers for my review.” | Maintain a selected source set, compare evidence, and draft a synthesis when asked. |
-| “Publish these results to this Feishu folder: `<link>`.” | Help set up the official Lark CLI and publish only the selected artifacts to the specified Drive/Wiki destination. |
 
 Notes are created when requested, not after every answer. Filing is opt-in and runs when Codex invokes the workflow, not through a background watcher. Your local files remain the primary copy.
 
@@ -63,9 +62,20 @@ You can also customize languages, note styles, categories, and your reading work
 
 New managed workspaces normally use `papers/`, `notes/` (images in `notes/assets/`), `references/`, and `surveys/`. Drop new PDFs in the workspace root; ask Codex to file them or enable that preference.
 
+## 🔌 Optional Work Connectors
+
+Want to use your research in another service? Tell Codex what you need, for example:
+
+```text
+Help me connect this workspace to Feishu for archiving selected notes.
+Find a suitable CLI on GitHub, help me install it, and keep the setup in this project.
+```
+
+Codex checks the tool's source and compatibility, helps with authorized installation and login, and records how to use it in the workspace's `connectors/README.md` (or your existing setup notes). Feishu/Lark is just one example; other services depend on available tools. Nothing is preinstalled or automatically synced, and a connection is not required for reading or notes.
+
 ## Scope and Compatibility
 
-The skill provides a small workflow and reliable local helpers. **The host agent does the reasoning and writing.** This is not a PDF reader, an unattended research service, or a general-purpose Feishu chat bot. Bring your usual reader and choose the sources you want to study; no model API key or dedicated server is required by the skill.
+The skill provides a small workflow and reliable local helpers. **The host agent does the reasoning and writing.** This is not a PDF reader, an unattended research service, or a general-purpose chat bot. Bring your usual reader and choose the sources you want to study; no model API key or dedicated server is required by the skill.
 
 The package uses standard `SKILL.md` instructions with optional Python 3.9+ helpers. Codex is the primary target. Other skill-capable agents may reuse it if they support local files and command execution; installation and tool access depend on the host. PDF extraction/rendering needs optional tools that Codex can help install when needed.
 
