@@ -1,23 +1,11 @@
-# Feishu/Lark Handoff
+# Feishu/Lark Artifact Handoff
 
-Use this reference only after the user explicitly asks to place a research artifact in Feishu/Lark.
+This integration publishes selected literature artifacts. Group agents, bot deployment, general office administration, and background sync are outside this skill.
 
-## Setup
+Use the official `lark-cli` and its installed-version help/skills for current commands. If missing, verify the official package and help install it when authorized. Reuse an appropriate existing profile; do not create or replace credentials by default. Authenticate only for the requested destination and capability; never print secrets.
 
-1. Check `lark-cli --version`.
-2. If absent, state the exact official package/version command and obtain the user's explicit approval before installing it. Do not install `@latest` automatically.
-3. Read the version-matched official guide with `lark-cli skills read lark-shared`, then read the target-domain guide.
-4. If unconfigured, run `lark-cli config init --new` and relay its authorization URL unchanged with the required QR code. For user-space research work, authenticate only the needed domains, normally `docs`, `drive`, `markdown`, or `wiki`.
+Resolve both the selected local files and the exact Drive folder or Wiki node before writing. The user's explicit request to publish those files there is authorization; ask only for missing scope or additional actions. Preview when supported. Overwriting, deleting, changing sharing, or syncing requires authorization for that action and target, not just an earlier upload request.
 
-## Choose the Target
+Prefer Drive attachments for PDFs, native Markdown for Markdown artifacts when supported, and Docs for a requested online document. A Wiki node is not a Drive folder: use the appropriate domain guide. HTML with relative images needs its assets packaged or separately published with corrected links; uploading the HTML alone does not publish a functioning website.
 
-- Local Markdown share paths or survey artifacts: create a native Drive Markdown file with `lark-cli markdown +create`.
-- Local PDFs, HTML notes, and attachments: use `lark-cli drive +upload`.
-- A formatted cloud document: use `lark-cli docs +create` only after reading the official document-format guide.
-- A Wiki destination: accept a concrete Wiki URL/node token and use its official guide; do not infer a parent location.
-
-Use relative local file paths from the workspace for CLI file arguments. A folder URL/token or Wiki URL/token and explicit publication intent are required. Run the matching `--dry-run` command first when supported. Never overwrite existing cloud content, sync a directory, move cloud resources, delete, or change permissions unless the user separately confirms the exact target and action.
-
-## After Publishing
-
-Return the created URL/token and the local artifact path. Keep the local artifact authoritative unless the user asks for a two-way synchronization workflow.
+After publishing, return the resulting links and corresponding local paths. Keep the local source authoritative unless another ownership/sync policy was requested. Report permission or tenant restrictions as blockers; do not try to bypass them or expand account scope silently.

@@ -23,7 +23,7 @@ from pathlib import Path
 from urllib.parse import urlparse, urlunparse
 from urllib.request import HTTPHandler, HTTPRedirectHandler, HTTPSHandler, ProxyHandler, Request, build_opener
 
-from build_paper_index import build_index, extract_pdf_title, workspace_pdfs
+from build_paper_index import build_index, extract_pdf_title, load_pymupdf, normalize as normalize_title, workspace_pdfs
 from find_paper import index_is_stale, score
 
 
@@ -137,10 +137,13 @@ class WorkflowError(Exception):
 
 
 def normalize(text: str) -> str:
-    text = unicodedata.normalize("NFKD", text).lower()
-    text = text.replace("&", " and ")
-    text = re.sub(r"[^a-z0-9]+", "_", text)
-    return re.sub(r"_+", "_", text).strip("_")
+    return normalize_title(text).replace(" ", "_")
+
+
+def legacy_title_key(text: str) -> str:
+    """Look up persisted keys from the former ASCII-only title normalization."""
+    text = unicodedata.normalize("NFKD", text).lower().replace("&", " and ")
+    return re.sub(r"[^a-z0-9]+", "_", text).strip("_")
 
 
 def note_filename(title: str) -> str:
@@ -149,7 +152,7 @@ def note_filename(title: str) -> str:
         head = title.split(":", 1)[0].strip()
         if head and len(head.split()) <= 4 and (re.search(r"[A-Z]{2,}|[-_]", head) or head[:1].isupper()):
             title = head
-    return f"{normalize(title)}.html"
+    return f"{normalize(title) or 'untitled'}.html"
 
 
 def entity_id(title: str) -> str:
@@ -381,7 +384,8 @@ def category_override(rules: dict, item: dict, rel_path: str, title: str) -> str
         candidate_key = organization_key(candidate)
         candidate_slug = normalize(candidate)
         for key, value in overrides.items():
-            if organization_key(str(key)) in {candidate_key, candidate_slug} and isinstance(value, str) and value.strip():
+            keys = {candidate_key, candidate_slug, legacy_title_key(candidate)} - {""}
+            if organization_key(str(key)) in keys and isinstance(value, str) and value.strip():
                 return value.strip()
     return None
 
@@ -460,7 +464,7 @@ def effective_organization_title(root: Path, item: dict, pdf_path: Path, rules: 
     return title or pdf_path.stem, str(item.get("title_source", "index"))
 
 
-def organization_items(root: Path, rules: dict) -> list[dict]:
+def organization_items(root: Path, rules: dict, inbox_only: bool = False) -> list[dict]:
     root = root.resolve()
     index = write_index(root)
     by_path: dict[str, tuple[str, dict]] = {}
@@ -469,6 +473,8 @@ def organization_items(root: Path, rules: dict) -> list[dict]:
         if not path or not str(path).lower().endswith(".pdf"):
             continue
         rel_path = str(path)
+        if inbox_only and Path(rel_path).parent != Path("."):
+            continue
         key = organization_key(rel_path)
         current = by_path.get(key)
         if current is None or str(item.get("source_type", "")) == "source_registry":
@@ -1357,24 +1363,20 @@ def record_aliases(record: dict) -> list[str]:
     return sorted({alias for alias in aliases if alias})
 
 
-def registry_score_item(record: dict) -> dict:
-    aliases = record_aliases(record)
-    return {
-        "title": record.get("title", ""),
-        "aliases": aliases,
-        "normalized_aliases": [re.sub(r"[^a-z0-9]+", " ", alias.lower()).strip() for alias in aliases],
-    }
-
-
 def find_source_record(records: list[dict], query: str) -> tuple[int, dict] | tuple[None, None]:
-    matches = sorted(
-        ((score(query, registry_score_item(record)), idx, record) for idx, record in enumerate(records)),
-        key=lambda item: item[0],
-        reverse=True,
-    )
-    if not matches or matches[0][0] < 0.92:
+    def key(value: str) -> str:
+        return " ".join(unicodedata.normalize("NFC", str(value)).casefold().split())
+
+    query_key = key(query)
+    matches = [
+        (idx, record) for idx, record in enumerate(records)
+        if query_key and query_key in {key(value) for value in record_aliases(record)}
+    ]
+    if len(matches) > 1:
+        raise WorkflowError("ambiguous_match", "source query matches multiple entities; use a unique ID", [r["id"] for _, r in matches])
+    if not matches:
         return None, None
-    return matches[0][1], matches[0][2]
+    return matches[0]
 
 
 def record_from_index_item(item: dict) -> dict:
@@ -1682,6 +1684,13 @@ def create_or_update_survey(root: Path, title: str, scope: str, papers: list[str
     slug = survey_slug(title)
     directory = workspace_path(root, SURVEYS_DIR / slug, "survey directory")
     manifest_path = workspace_path(root, directory / SURVEY_MANIFEST, "survey manifest")
+    legacy_slug = legacy_title_key(title)[:96].strip("_")
+    if not manifest_path.exists() and legacy_slug and legacy_slug != slug:
+        legacy_path = workspace_path(root, SURVEYS_DIR / legacy_slug / SURVEY_MANIFEST, "legacy survey manifest")
+        if legacy_path.exists() and normalize(load_survey_manifest(legacy_path)["title"]) == normalize(title):
+            manifest_path = legacy_path
+            directory = legacy_path.parent
+            slug = legacy_slug
     existing = load_survey_manifest(manifest_path) if manifest_path.exists() else None
     if existing is None and directory.exists():
         raise WorkflowError("survey_path_conflict", f"survey directory already exists without a manifest: {directory.relative_to(root)}")
@@ -1744,7 +1753,7 @@ def text_extractor_status() -> dict[str, bool]:
     except ImportError:
         pypdf = False
     try:
-        import fitz  # noqa: F401
+        load_pymupdf()
 
         pymupdf = True
     except ImportError:
@@ -1775,14 +1784,14 @@ def extract_pdf_pages_with_pypdf(pdf_path: Path, max_pages: int | None) -> list[
 
 def extract_pdf_pages_with_pymupdf(pdf_path: Path, max_pages: int | None) -> list[str]:
     try:
-        import fitz
+        pymupdf = load_pymupdf()
     except ImportError as exc:
         raise WorkflowError("text_extractor_missing", "Python package `PyMuPDF` is not available") from exc
 
     try:
-        doc = fitz.open(str(pdf_path))
-        limit = len(doc) if max_pages is None else min(max_pages, len(doc))
-        return [doc.load_page(idx).get_text() or "" for idx in range(limit)]
+        with pymupdf.open(str(pdf_path)) as doc:
+            limit = len(doc) if max_pages is None else min(max_pages, len(doc))
+            return [doc.load_page(idx).get_text() or "" for idx in range(limit)]
     except Exception as exc:
         raise WorkflowError("pdf_read_failed", f"failed to read PDF: {pdf_path}", str(exc)) from exc
 
@@ -1803,7 +1812,10 @@ def extract_pdf_pages_with_pdftotext(pdf_path: Path, max_pages: int | None) -> l
             {"stdout": result.stdout[-1000:], "stderr": result.stderr[-1000:]},
         )
     pages = result.stdout.split("\f")
-    return [page for page in pages if page.strip()]
+    # Poppler terminates every page with a form feed, including blank pages.
+    if pages and not pages[-1].strip():
+        pages.pop()
+    return pages
 
 
 def extract_pdf_pages(pdf_path: Path, max_pages: int | None = None) -> list[str]:
@@ -1917,6 +1929,8 @@ def method_like_section(text: str) -> tuple[str, str, str]:
 
 
 def readpack(root: Path, query: str, max_pages: int) -> dict:
+    if max_pages < 1:
+        raise WorkflowError("invalid_pages", "--max-pages must be positive")
     pdf_path, match = resolve_pdf(root, query)
     if match is None:
         relative = str(pdf_path.relative_to(root)) if pdf_path.is_relative_to(root) else ""
@@ -1946,9 +1960,37 @@ def readpack(root: Path, query: str, max_pages: int) -> dict:
     }
 
 
+def read_pages(root: Path, query: str, selection: str | None = None) -> dict:
+    """Return source text by physical PDF page, without section heuristics."""
+    intervals: list[tuple[int, int]] = []
+    if selection is not None:
+        for part in selection.split(","):
+            match = re.fullmatch(r"\s*([0-9]+)(?:-([0-9]+))?\s*", part)
+            if not match:
+                raise WorkflowError("invalid_pages", "use page numbers/ranges, for example 1,3-5")
+            start, end = int(match[1]), int(match[2] or match[1])
+            if start < 1 or end < start:
+                raise WorkflowError("invalid_pages", "pages must be positive ascending ranges")
+            intervals.append((start, end))
+    pdf_path, match = resolve_pdf(root, query)
+    pages = extract_pdf_pages(pdf_path)
+    if any(end > len(pages) for _, end in intervals):
+        raise WorkflowError("invalid_pages", f"PDF has {len(pages)} pages")
+    numbers = sorted({page for start, end in intervals for page in range(start, end + 1)}) if intervals else range(1, len(pages) + 1)
+    selected = [{"page": number, "text": pages[number - 1]} for number in numbers]
+    return {
+        "path": relative_locator(root, pdf_path),
+        "title": match.get("title") if match else pdf_path.stem,
+        "page_count": len(pages),
+        "pages": selected,
+        "warnings": ["some_pages_have_no_text; render them or use OCR"]
+        if not selected or any(not page["text"].strip() for page in selected) else [],
+    }
+
+
 def renderer_status() -> dict[str, bool]:
     try:
-        import fitz  # noqa: F401
+        load_pymupdf()
 
         pymupdf = True
     except ImportError:
@@ -1989,7 +2031,7 @@ def render_page_with_ghostscript(pdf_path: Path, output: Path, page: int, dpi: i
         gs,
         "-dNOPAUSE",
         "-dBATCH",
-        "-sDEVICE=pngalpha",
+        "-sDEVICE=png16m",
         f"-r{dpi}",
         f"-dFirstPage={page}",
         f"-dLastPage={page}",
@@ -2007,16 +2049,16 @@ def render_page_with_ghostscript(pdf_path: Path, output: Path, page: int, dpi: i
 
 def render_page_with_pymupdf(pdf_path: Path, output: Path, page: int, dpi: int) -> None:
     try:
-        import fitz
+        pymupdf = load_pymupdf()
     except ImportError as exc:
         raise WorkflowError("pdf_renderer_missing", "PyMuPDF is not available") from exc
     try:
-        doc = fitz.open(str(pdf_path))
-        if page < 1 or page > len(doc):
-            raise WorkflowError("invalid_page", f"page {page} is outside 1..{len(doc)}")
-        matrix = fitz.Matrix(dpi / 72, dpi / 72)
-        pixmap = doc.load_page(page - 1).get_pixmap(matrix=matrix, alpha=True)
-        pixmap.save(str(output))
+        with pymupdf.open(str(pdf_path)) as doc:
+            if page < 1 or page > len(doc):
+                raise WorkflowError("invalid_page", f"page {page} is outside 1..{len(doc)}")
+            matrix = pymupdf.Matrix(dpi / 72, dpi / 72)
+            pixmap = doc.load_page(page - 1).get_pixmap(matrix=matrix, alpha=False)
+            pixmap.save(str(output))
     except WorkflowError:
         raise
     except Exception as exc:
@@ -2193,7 +2235,7 @@ def cmd_add(args: argparse.Namespace) -> int:
 
 def cmd_organize(args: argparse.Namespace) -> int:
     rules = load_organization_rules(args.root, args.rules)
-    planned = organization_items(args.root, rules)
+    planned = organization_items(args.root, rules, inbox_only=args.inbox)
     if args.apply:
         payload = apply_organization(args.root, planned)
     else:
@@ -2202,9 +2244,25 @@ def cmd_organize(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_recover(args: argparse.Namespace) -> int:
+    ensure_root(args.root)
+    if args.apply:
+        payload = recover_pending_organization(args.root) or {"recovered": 0, "restored": 0}
+    else:
+        journal = load_organization_journal(args.root)
+        payload = {"dry_run": True, "pending": journal is not None, "journal": journal}
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0
+
+
 def cmd_readpack(args: argparse.Namespace) -> int:
     payload = readpack(args.root, args.query, args.max_pages)
     print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_read(args: argparse.Namespace) -> int:
+    print(json.dumps(read_pages(args.root.resolve(), args.query, args.pages), ensure_ascii=False, indent=2))
     return 0
 
 
@@ -2236,6 +2294,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         "source_registry_exists": source_path.exists(),
         "source_registry_records": len(load_source_records(args.root)) if source_path.exists() else 0,
         "survey_count": len(survey_manifest_paths(args.root)),
+        "organization_recovery_pending": organization_journal_path(args.root).exists(),
     }
     print(json.dumps(status, ensure_ascii=False, indent=2))
     return 0 if any(text_extractors.values()) else 1
@@ -2268,6 +2327,14 @@ def cmd_source_add(args: argparse.Namespace) -> int:
     records = load_source_records(args.root)
     record_id = args.id or entity_id(args.title)
     idx, existing = find_source_record(records, args.title)
+    if args.id and existing and str(existing.get("id")) != args.id:
+        raise WorkflowError("entity_id_conflict", "title already belongs to a different entity ID")
+    if existing is None:
+        ids = {str(record.get("id")) for record in records}
+        if args.id and record_id in ids:
+            raise WorkflowError("entity_id_conflict", "entity ID already exists; use source link to attach sources")
+        if not args.id:
+            record_id = unique_record_id(records, args.title)
     sources = collect_sources(args)
     aliases = sorted({*(args.alias or []), *(existing.get("aliases", []) if existing else [])})
 
@@ -2297,8 +2364,13 @@ def cmd_source_link(args: argparse.Namespace) -> int:
             raise WorkflowError("no_match", f"no entity match: {args.query}")
         if len(matches) > 1 and matches[0]["score"] - matches[1]["score"] <= AMBIGUITY_MARGIN:
             raise WorkflowError("ambiguous_match", "entity query is ambiguous", matches)
-        record = record_from_index_item(matches[0])
-        idx = None
+        item = matches[0]
+        # Only registry-backed IDs identify stored entities; inferred IDs can collide.
+        if item.get("source_type") == "source_registry":
+            idx, record = find_source_record(records, str(item.get("entity_id") or item["title"]))
+        if record is None:
+            record = record_from_index_item(item)
+            record["id"] = unique_record_id(records, str(item["title"]))
 
     sources = collect_sources(args)
     if not sources:
@@ -2409,12 +2481,22 @@ def main() -> int:
     )
     organize.add_argument("--rules", type=Path, help="organization rules JSON, relative to workspace root")
     organize.add_argument("--apply", action="store_true", help="apply the plan; without it, print a dry-run plan")
+    organize.add_argument("--inbox", action="store_true", help="organize only PDFs at the workspace root, preserving existing folders")
     organize.set_defaults(func=cmd_organize)
+
+    recover = sub.add_parser("recover", help="inspect an interrupted organization; apply only after checking its scope")
+    recover.add_argument("--apply", action="store_true", help="recover the pending file/metadata operation")
+    recover.set_defaults(func=cmd_recover)
 
     pack = sub.add_parser("readpack", help="resolve PDF and extract abstract/method/workflow snippets")
     pack.add_argument("query")
     pack.add_argument("--max-pages", type=int, default=12)
     pack.set_defaults(func=cmd_readpack)
+
+    read = sub.add_parser("read", help="extract full text or selected PDF pages without section truncation")
+    read.add_argument("query")
+    read.add_argument("--pages", help="1-based PDF pages, for example 1,3-5; omitted reads all pages")
+    read.set_defaults(func=cmd_read)
 
     note = sub.add_parser("note-name", help="normalize title to HTML note filename")
     note.add_argument("title")
@@ -2489,8 +2571,11 @@ def main() -> int:
     args = parser.parse_args()
     args.root = args.root.resolve()
     try:
-        if args.cmd != "setup":
-            recover_pending_organization(args.root)
+        if args.cmd not in {"recover", "doctor", "note-name"} and organization_journal_path(args.root).exists():
+            raise WorkflowError(
+                "organization_recovery_required",
+                "an organization is unfinished; inspect with recover, then use recover --apply within the authorized scope",
+            )
         return args.func(args)
     except Exception as exc:
         return handle_error(exc)

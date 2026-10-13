@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Scan tracked release files and reachable history for common secret/privacy leaks."""
+"""Scan release files and reachable history for common secret/privacy leaks."""
 
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ URL_CREDENTIAL_RE = re.compile(r"https?://[^/\s:@]+:[^/\s@]+@", re.IGNORECASE)
 def iter_files() -> list[Path]:
     try:
         result = subprocess.run(
-            ["git", "ls-files", "-z"],
+            ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
             cwd=ROOT,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -45,7 +45,8 @@ def iter_files() -> list[Path]:
             for path in ROOT.rglob("*")
             if path.is_file() and not any(part in ignored for part in path.parts)
         ]
-    return [ROOT / name for name in result.stdout.decode("utf-8").split("\0") if name]
+    names = dict.fromkeys(result.stdout.decode("utf-8").split("\0"))
+    return [ROOT / name for name in names if name and (ROOT / name).is_file()]
 
 
 def release_leaks(text: str) -> list[str]:
@@ -91,24 +92,30 @@ def main() -> int:
             leaks.append(f"{path.relative_to(ROOT)} contains {leak!r}")
     for commit in history_commits():
         result = subprocess.run(
-            ["git", "grep", "-Il", "", commit],
+            ["git", "grep", "-Ilz", "", commit],
             cwd=ROOT,
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
-        for path in result.stdout.splitlines():
+        if result.returncode not in (0, 1):
+            leaks.append(f"could not scan history {commit[:12]}")
+            continue
+        for object_name in filter(None, result.stdout.split("\0")):
             blob = subprocess.run(
-                ["git", "show", f"{commit}:{path}"],
+                ["git", "show", object_name],
                 cwd=ROOT,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
             )
-            if blob.returncode != 0 or b"\0" in blob.stdout:
+            if blob.returncode != 0:
+                leaks.append(f"could not read history object {object_name}")
+                continue
+            if b"\0" in blob.stdout:
                 continue
             text = blob.stdout.decode("utf-8", errors="ignore")
             for leak in release_leaks(text):
-                leaks.append(f"history {commit[:12]}:{path} contains {leak!r}")
+                leaks.append(f"history {object_name} contains {leak!r}")
     if leaks:
         print("\n".join(leaks))
         return 1

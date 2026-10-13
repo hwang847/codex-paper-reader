@@ -1,6 +1,6 @@
 interface:
-  display_name: "Literature Workflow"
-  short_description: "Read papers, build surveys, and hand off to Lark"
-  default_prompt: "Use $literature-workflow to set up this literature workspace for reading and survey work."
+  display_name: "Codex Paper Reader"
+  short_description: "Discuss papers and keep source-linked research notes"
+  default_prompt: "Use $literature-workflow to help me read this paper and discuss it in the context of my research."
 policy:
   allow_implicit_invocation: true

@@ -2,6 +2,22 @@
 
 [中文](CHANGELOG.zh-CN.md)
 
+## 2026-10-13: Leaner Literature Workflow
+
+- Reduced the always-loaded skill to task boundaries, evidence handling, and source continuity. Setup, commands, surveys, and Feishu publishing are on-demand references.
+- Rewrote the quickstart around installation by conversation, an existing paper folder, and copied titles. Added traditional Chinese, Japanese, and Korean alongside English and simplified Chinese.
+- First-time setup can ask brief, relevant preference questions and ends with a clear summary of saved choices, file locations, verified capabilities, and the next reading step.
+- Kept reading depth and output structure with the host agent and workspace preferences; experiments and appendices are available for writing and critical reading.
+- Added `read [--pages 1,3-5]` for untruncated page text with physical PDF page numbers. `readpack` remains a preview.
+- Added `organize --inbox` to restrict filing to newly dropped root PDFs without reorganizing existing folders.
+- Made interrupted filing recovery explicit with `recover [--apply]`; previews and reads no longer trigger hidden file moves.
+- Prevented fuzzy source-title matching from merging distinct entities; retained legacy category keys and survey directories.
+- Fixed multilingual title matching and filenames, blank-page loss in Poppler extraction, and title indexing with PyMuPDF or missing PDF metadata.
+- Use the current PyMuPDF import name with a legacy fallback, preventing deprecation messages from corrupting CLI JSON.
+- Render page screenshots with opaque backgrounds so source text stays visible in dark note viewers.
+- Preserved existing commands and workspace formats. No automatic library migration, new service, model dependency, or cloud connection.
+- Added focused regression coverage and repaired release privacy scanning for untracked files and reachable history.
+
 ## 2026-07-16
 
 ### Easier installation and standards review

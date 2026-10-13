@@ -31,10 +31,18 @@ def clean_bib_value(value: str) -> str:
 
 
 def normalize(text: str) -> str:
-    text = unicodedata.normalize("NFKD", text)
-    text = text.lower()
+    chars = []
+    latin_base = False
+    for char in unicodedata.normalize("NFKD", text):
+        if unicodedata.combining(char):
+            # Preserve legacy Latin separators without erasing other scripts.
+            chars.append(" " if latin_base else char)
+        else:
+            latin_base = unicodedata.name(char, "").startswith("LATIN ")
+            chars.append(char)
+    text = unicodedata.normalize("NFC", "".join(chars)).lower()
     text = text.replace("&", " and ")
-    text = re.sub(r"[^a-z0-9]+", " ", text)
+    text = "".join(char if char.isalnum() or unicodedata.category(char).startswith("M") else " " for char in text)
     return re.sub(r"\s+", " ", text).strip()
 
 
@@ -396,6 +404,14 @@ def author_or_affiliation_line(line: str) -> bool:
     return line.count(",") >= 2 and len(names) >= 4
 
 
+def load_pymupdf():
+    try:
+        import pymupdf
+    except ImportError:
+        import fitz as pymupdf
+    return pymupdf
+
+
 def extract_pdf_title(pdf_path: Path) -> str | None:
     text = ""
     try:
@@ -406,7 +422,7 @@ def extract_pdf_title(pdf_path: Path) -> str | None:
         logger.setLevel(logging.ERROR)
         try:
             reader = PdfReader(str(pdf_path))
-            metadata_title = clean_pdf_text(str(reader.metadata.title or ""))
+            metadata_title = clean_pdf_text(str(getattr(reader.metadata, "title", "") or ""))
             if metadata_title and not looks_generic_title(metadata_title):
                 return metadata_title
 
@@ -415,6 +431,16 @@ def extract_pdf_title(pdf_path: Path) -> str | None:
             logger.setLevel(previous_level)
     except Exception:
         text = ""
+
+    if not text:
+        try:
+            with load_pymupdf().open(str(pdf_path)) as doc:
+                metadata_title = clean_pdf_text(str((doc.metadata or {}).get("title") or ""))
+                if metadata_title and not looks_generic_title(metadata_title):
+                    return metadata_title
+                text = doc[0].get_text() if len(doc) else ""
+        except Exception:
+            text = ""
 
     if not text and shutil.which("pdftotext"):
         result = subprocess.run(

@@ -1,138 +1,88 @@
-# Codex 论文阅读工作流 Skill
+# Codex Paper Reader
 
-[English](README.md) | [更新说明](CHANGELOG.zh-CN.md)
+[English](README.md) · [简体中文](README.zh-CN.md) · [繁體中文](README.zh-TW.md) · [日本語](README.ja.md) · [한국어](README.ko.md)
 
-这是一个配合 PDF 阅读器使用的 Codex skill。你继续在 Zotero、Office、Preview 或浏览器中阅读 PDF；Codex 负责从复制的标题定位本地文件、陪你解读论文、管理相关 source、整理综述范围，并把讨论沉淀成简洁的 HTML 笔记或飞书内容。
+**和 Agent 一起读论文，留下理解，而不只是 PDF。**
 
-本仓库使用 Codex 开发并维护。
+一个轻量的文献工作流 Skill，帮助你讨论论文、管理来源、生成个性化 HTML 笔记和撰写综述。与 Zotero、浏览器或你惯用的 PDF 阅读器配合使用。使用 Codex 开发并维护。
 
-## 你只需要做什么
+## 🚀 快速开始
 
-1. 安装一次 skill。
-2. 选择一个本地文件夹作为论文工作区。
-3. 把下载好的 PDF 放进去，不需要改名。
-4. 从阅读器复制论文标题，直接和 Codex 讨论。
-
-你不需要手动建目录、重命名编号 PDF、建立索引或维护 source registry。
-
-## Quickstart
-
-需要 Python 3.9 或更高版本。可选的 PDF 文本/渲染能力会在配置时由 Codex 自动检查。
-
-最简单的安装方式，是把[仓库链接](https://github.com/hwang847/codex-paper-reader.git)直接交给 Codex，并告诉它：
+**1. 让 Codex 帮你安装**
 
 ```text
-请从 https://github.com/hwang847/codex-paper-reader.git 安装或更新名为 literature-workflow 的 Codex Skill。先检查现有安装并保留本地修改，验证 SKILL.md 后告诉我何时可以使用。
+帮我安装这个 Skill：https://github.com/hwang847/codex-paper-reader.git
 ```
 
-Codex 会代你放置并验证 Skill。也可以选择在终端手动安装：
+**2. 在 Codex 中打开论文文件夹**
 
-```bash
-mkdir -p ~/.codex/skills
-git clone https://github.com/hwang847/codex-paper-reader.git ~/.codex/skills/literature-workflow
-```
-
-`mkdir -p` 只是确保 Skill 的父目录存在；目录已经存在时不会产生影响。安装后的 Skill 通常会在 Codex 的下一轮对话可用；如果当前任务没有识别到它，新建一个 Codex App 任务或开启新的 CLI 会话即可。
-
-打开你想作为论文库的文件夹，或者在终端 `cd` 到这个文件夹，然后对 Codex 说：
+选择一个本地目录，然后说：
 
 ```text
-使用 $literature-workflow，帮我配置这个论文阅读工作区。
+使用 $literature-workflow，帮我配置这个文件夹的论文阅读工作环境。
 ```
 
-Codex 会创建工作区、检查本地 PDF 能力，并根据你的偏好写出精简的本地 `AGENTS.md`。如果希望新文献自动归档，在配置时直接告诉它。
+Codex 会检查环境，必要时简单问问你的阅读目标、语言和归档偏好，保留已有文件和指令，并将确认的偏好记入本地 `AGENTS.md`。配置后会告诉你文件放在哪里、哪些功能已就绪、还有哪些未完成，以及如何开始阅读。Python 和 PDF 工具也可以交给 Codex 协助配置，不必提前准备；偏好随时可以通过对话调整。
 
-## 带我读一篇论文
+**3. 放入 PDF，开始讨论**
 
-工作区配置后，日常流程只有三步：
-
-1. 把新 PDF 放在工作区根目录。`2508.05002v1.pdf`、`2025.findings-naacl.245.pdf`、`download.pdf`、`Paper.PDF` 都可以。
-2. 用你平常的阅读器打开它，复制论文标题。
-3. 对 Codex 说：
+保留 `2508.05002v1.pdf` 这样的下载文件名即可。从阅读器复制论文标题：
 
 ```text
-使用 $literature-workflow，带我读这篇文献：
-APEX-SQL: Talking to the data via Agentic Exploration for Text-to-SQL
+带我阅读这篇论文：<复制的标题>
+从实现角度讲清楚它的方法流程。
+现在根据我们的讨论生成 HTML 笔记。
 ```
 
-Codex 会按需刷新索引，找到对应的本地 PDF，先从摘要开始，再解释论文主张和可实现的 method pipeline。之后自然追问即可：
+Codex 通过标题索引找到本地 PDF，你不需要手动改名或维护索引。扫描件、特殊排版或同名文献可能需要补充路径或纠正标题。
 
-```text
-按实现视角带我走一遍 pipeline。
-每个 agent 保存什么状态？反馈如何影响下一步？
-把这篇放进我正在写的综述脉络里。
-为这篇生成简洁的 HTML 笔记。
-```
+## ✨ 可以帮你做什么
 
-HTML 笔记会结合论文和你们的讨论生成。后续提问改变了对论文的理解时，Codex 应更新同一份笔记；本地支持渲染时，也可以放入原生 PDF 截图。
+| 你提出需求 | Codex 与 Skill 帮你完成 |
+| --- | --- |
+| “结合我的研究方向讲解。” | 按你的深度偏好阅读、翻译和讨论，需要时深入实验与附录。 |
+| “把我们讨论清楚的要点记下来。” | 生成精简、因文而异的 HTML 笔记，附来源链接和论文插图截图；后续理解变化时更新同一份笔记。 |
+| “整理新加入的论文。” | 预览按标题重命名及分类的结果，再归档 PDF，不覆盖重名文件，并维护已管理的引用链接。 |
+| “这个代码仓库对应那篇论文。” | 将 PDF、arXiv、DOI、代码和技术文档关联为同一阅读对象的多个来源。 |
+| “比较这些文献，辅助我的综述。” | 维护选定文献范围、对照证据，并在你要求时撰写综述。 |
+| “将这些成果发布到飞书：<文件夹链接>。” | 协助配置官方 Lark CLI，仅将选定成果发布到指定云盘或知识库位置。 |
 
-## 写综述
+笔记在你提出要求后生成，不会每次回答都新建一份。自动归档需启用，在 Codex 调用工作流时执行，没有后台监听。你的本地文件始终是主要副本。
 
-选定文献后，用自然语言说明问题和边界：
-
-```text
-使用 $literature-workflow，围绕 Text-to-SQL 的 execution-feedback training 建立综述范围。
-核心论文是 ExCoT、SQL-Trail 和 MTSQL-R1。
-把我已有的 integrated_survey.md 作为只读来源。
-```
-
-Codex 会在 `surveys/<topic>/` 创建可追溯的范围清单和阅读包。已有综述可以登记为 source；你要求时也可以移动到 `surveys/sources/` 统一管理，但内容不会被改写。之后继续让 Codex 比较文献、梳理叙事、定位空白，或按你的风格生成/更新综述正文即可。
-
-## 自动重命名与归档
-
-自动归档是可选的：配置工作区时启用，或者直接让 Codex 整理新 PDF。
-
-启用后，工作流会：
-
-- 从 PDF 文本中识别真实标题，尽量忽略会议页眉等通用元数据；
-- 将下载文件规范化为论文标题对应的文件名；
-- 依据可编辑的本地规则放入唯一的 `papers/<category>/` 目录；
-- 发现同名文件时加后缀保留，不会覆盖；
-- 在路径变化后同步更新搜索索引、source registry、BibTeX 的 `Source` 注释和本地笔记链接。
-
-初始分类是通用的。你只需告诉 Codex 想怎样分组，它会调整 `references/organization_rules.json` 和本地 `AGENTS.md`。无法可靠判断的论文会留在兜底分类；工作流不会删除 PDF。
-
-## 沉淀到飞书
-
-当笔记、综述材料或分享路径准备好后，提供确切的云盘文件夹或知识库链接，并说明要发布什么：
-
-```text
-使用 $literature-workflow，把 recommended_readings.md 发布到这个飞书文件夹：<链接>。
-```
-
-Codex 会检查飞书官方 `lark-cli`；缺失时会先说明确切安装命令并征得同意，随后引导一次授权、在支持时先预览，再创建你指定的云端内容。除非你明确提出，它不会同步目录、覆盖/移动/删除云端文件，也不会改动分享权限。
-
-## Codex 维护的内容
-
-```text
-your-workspace/
-├── papers/                 # 已归档 PDF
-├── notes/                  # HTML 笔记
-│   └── assets/             # 原生 PDF 截图
-├── references/             # 索引、source registry、归档规则
-├── surveys/                # 综述范围清单、阅读包、受管理的原始综述
-└── AGENTS.md               # 你的稳定阅读偏好
-```
-
-一个阅读对象可以拥有多个 source：本地 PDF、arXiv、DOI、项目页、代码仓库、slides 或技术文档。它们会被记录为同一个 entity，因此复制来的标题无需和下载文件名一致。
-
-## 把它变成你的工作流
+## 🎯 按你的方式使用
 
 直接告诉 Codex：
 
 ```text
-阅读和笔记使用中文。
-重点关注实现细节和 pipeline 复现。
-默认跳过实验，除非我问。
-我正在写综述，所以更关注 related work 和论文定位。
-每篇论文也关联项目页和 GitHub repo。
+我正在写综述，更关注每篇论文如何定位自己与已有工作的关系。
+以论文写作为目的阅读时，要包括实验设计和相关附录。
+请将这些偏好记在当前工作区的 AGENTS.md 中。
 ```
 
-Codex 会把稳定偏好精简地维护在该工作区的 `AGENTS.md`。公开 skill 提供稳定的工具和流程；你的工作区定义具体的研究语境。
+语言、笔记风格、分类方式和阅读流程都可以通过对话调整。已有文献库无需强行迁移到新的目录结构。
 
-## 维护者测试
+新工作区通常使用 `papers/`、`notes/`（图片放在 `notes/assets/`）、`references/` 和 `surveys/`。新 PDF 放在工作区根目录，让 Codex 整理或启用自动归档偏好即可。
 
-```bash
-python3 tests/smoke_test.py
-python3 tests/privacy_scan.py
+## 能力边界与兼容性
+
+Skill 提供精简工作流和可靠的本地工具，**推理与写作交给宿主 Agent**。它不是 PDF 阅读器、无人值守的研究服务或通用飞书聊天机器人。继续使用你习惯的阅读器，并选择想研究的来源；Skill 本身不需要模型 API Key 或专用服务器。
+
+采用标准 `SKILL.md`，辅助脚本需要 Python 3.9+，以 Codex 为主要使用环境。其他支持 Skill、本地文件及命令执行的 Agent 也可复用，安装方式和工具权限由宿主决定。PDF 提取和渲染依赖可选工具，需要时由 Codex 协助安装。
+
+安全文件移动依赖 POSIX 接口，适用于 macOS/Linux；Windows 请使用 WSL，暂不支持原生 Windows 归档。
+
+<details>
+<summary>手动安装或更新已有安装</summary>
+
+全新安装可执行：
+
+```sh
+mkdir -p ~/.agents/skills
+git clone https://github.com/hwang847/codex-paper-reader.git ~/.agents/skills/literature-workflow
 ```
+
+已安装在 `~/.codex/skills` 或其他支持的路径？让 Codex 更新原有副本并保留你的修改，避免重复安装。未识别到 Skill 时，重启 Codex 会话。
+
+</details>
+
+[更新说明](CHANGELOG.zh-CN.md) · [定制与贡献](CONTRIBUTING.md) · [许可证](LICENSE)

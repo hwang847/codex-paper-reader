@@ -6,21 +6,11 @@ from __future__ import annotations
 import argparse
 import difflib
 import json
-import re
 import subprocess
 import sys
-import unicodedata
 from pathlib import Path
 
-from build_paper_index import workspace_pdfs
-
-
-def normalize(text: str) -> str:
-    text = unicodedata.normalize("NFKD", text)
-    text = text.lower()
-    text = text.replace("&", " and ")
-    text = re.sub(r"[^a-z0-9]+", " ", text)
-    return re.sub(r"\s+", " ", text).strip()
+from build_paper_index import normalize, workspace_pdfs
 
 
 def index_inputs(root: Path) -> list[Path]:
@@ -85,7 +75,13 @@ def load_index(root: Path, index_path: Path) -> list[dict]:
 
 def score(query: str, item: dict) -> float:
     q = normalize(query)
-    aliases = item.get("normalized_aliases") or [normalize(item.get("title", ""))]
+    if not q:
+        return 0.0
+    # Raw aliases allow older indexes to benefit from Unicode-aware matching.
+    aliases = [normalize(alias) for alias in (
+        item.get("aliases") or item.get("normalized_aliases") or []
+    )]
+    aliases.append(normalize(item.get("title", "")))
     best = 0.0
     for alias in aliases:
         if not alias:

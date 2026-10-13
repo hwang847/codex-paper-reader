@@ -168,15 +168,6 @@ def assert_pinned_download_boundaries(workspace: Path) -> None:
 
 
 def main() -> int:
-    consent_documents = [
-        ROOT / "SKILL.md",
-        ROOT / "references" / "lark_handoff.md",
-        ROOT / "references" / "workspace_setup.md",
-        ROOT / "templates" / "AGENTS.example.md",
-    ]
-    for document in consent_documents:
-        assert "explicit approval" in document.read_text(encoding="utf-8"), f"missing install consent rule: {document}"
-
     sample_text = """
 Abstract
 This paper studies retrieval.

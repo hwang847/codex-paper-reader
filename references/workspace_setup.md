@@ -1,63 +1,24 @@
-# Workspace Setup Guidance
+# Workspace Setup
 
-Use this reference only when the user asks to set up, initialize, or configure a literature workspace.
+Inspect the chosen folder and existing `AGENTS.md` before changing it. When useful, ask briefly about missing preferences such as reading language, research goal, or automatic filing; reuse known answers rather than imposing a questionnaire. Let the user defer optional choices and explain the defaults used. Without an existing preference or request, leave files in place and cloud services disconnected; optional customization must not block basic reading.
 
-## Principle
+For a new managed library, `setup` creates folders, rules, and indexes without moving PDFs or generating personal instructions. Use `doctor` to check capabilities; help install missing tools in the chosen environment when authorized. No dependency installation, account login, or cloud publishing is an implicit side effect of the Python helpers.
 
-Let scripts handle mechanical setup. Let Codex handle personalization.
-
-Run `scripts/paper_workflow.py --root <workspace> setup` to create the standard folders, organization rules, source registry, and index. Run `doctor` after that. Then create, update, and maintain the workspace's local `AGENTS.md` from the user's intent.
-
-This open-source skill provides base mechanics and a starting workflow. The user's own `AGENTS.md` is the evolving local workflow.
-
-Keep scripts for capabilities that are deterministic, repetitive, or fragile when done manually: indexing, title-to-PDF lookup, source registry updates, PDF rendering, note filenames, environment checks, policy-controlled organization, and survey scope manifests. The scripts make filing collision-safe and keep generated references synchronized; Codex decides the user's taxonomy, research narrative, and when that policy should apply.
-
-Do not treat `templates/AGENTS.example.md` as a fixed file to copy. It is only a shape reference.
-
-Do not ask the user to create `papers/`, `notes/`, `notes/assets/`, or `references/`; setup creates them. Do not ask the user to inspect Python packages; use `doctor` and handle missing optional dependencies.
-
-## Interaction
-
-If the user gives enough preference context, act immediately. If the workspace preference is unclear, ask one short question at most, such as:
+Default layout:
 
 ```text
-What should Codex optimize for in this literature folder: fast paper reading, implementation-focused notes, survey mapping, or something else?
+<workspace>/               # new PDFs may arrive here
+  papers/<category>/      # optional organized library
+  notes/assets/           # HTML notes live in notes/, images in assets/
+  references/             # paper_index.jsonl, source_registry.jsonl, organization_rules.json
+  surveys/<topic>/        # generated manifests and reading packs
+  surveys/sources/        # registered drafts moved here only when requested
 ```
 
-Good preference signals include:
+Preserve an existing layout. The index scans root PDFs, `papers/`, and explicitly registered PDFs elsewhere inside the workspace. Use `source add --pdf` for those files; do not require a move just to read them.
 
-- language;
-- research area;
-- how much to emphasize method pipelines;
-- whether to skip experiments by default;
-- HTML note style;
-- naming rules;
-- source-management needs;
-- survey-writing scope and source-draft policy;
-- whether completed work should be deposited in Feishu/Lark;
-- topics or actions to avoid.
+Maintain a short workspace-local `AGENTS.md` with only durable user choices: language, research goal, reading depth, note style, and whether automatic filing is enabled. Merge with existing instructions and retain unrelated imports. Do not copy the skill into it or invent preferences from a one-off request. [The example](../templates/AGENTS.example.md) is a shape reference, not a required template.
 
-## AGENTS.md
+Filing runs when the agent invokes the workflow; there is no watcher. The taxonomy in `references/organization_rules.json` is editable. Review title/category uncertainty before applying, and use overrides for corrections. Existing workspaces keep their rules and registry IDs. Run one mutating workflow command at a time; the helpers have conflict recovery, not multi-writer locking.
 
-Generate `AGENTS.md` as a compact local contract for Codex. It should usually include:
-
-- imports, if the user's local environment has stable private imports;
-- workspace purpose;
-- folder rules;
-- source/entity rules;
-- reading priorities;
-- note-generation rules;
-- survey-source immutability and Lark publication constraints when relevant;
-- explicit constraints from the user.
-
-Keep it short. Remove motivational prose, examples that only belong in README, and anything the skill already covers.
-
-Treat the managed workspace as single-writer while a workflow command runs. Do not run organization, indexing, or rendering while another process or sync client is renaming managed directories.
-
-If `AGENTS.md` already exists, read it first and update it conservatively. Preserve stable user preferences. Do not overwrite unrelated local runtime imports. When the user later changes a durable preference, update `AGENTS.md` again instead of leaving the workspace rules stale.
-
-## Survey Sources and Lark
-
-When a user has an existing survey or literature map, register it through `survey source add`. It may be moved into `surveys/sources/` only with an explicit request; never modify its content. Generate survey prose only when explicitly requested.
-
-When a user asks to use Feishu/Lark, let Codex check the official `lark-cli`; if it is missing, state the exact install command and obtain explicit approval before installing. Then guide the required authentication and ask for a concrete cloud destination. Cloud writes are never part of ordinary workspace setup.
+Close setup with a brief user-facing handoff: what changed, where PDFs and notes belong, which preferences were saved in `AGENTS.md`, verified capabilities and anything still unavailable, and one next reading request. Explain that preferences can be changed through conversation. Report partial readiness honestly rather than claiming untested features are configured.
