@@ -1,98 +1,116 @@
-# Codex Paper Reader
+# 📚 Codex Paper Reader
 
 [English](README.md) · [简体中文](README.zh-CN.md) · [繁體中文](README.zh-TW.md) · [日本語](README.ja.md) · [한국어](README.ko.md)
 
-**Read papers with an agent. Keep the understanding, not just the PDF.**
+**Your local paper library, ready for a conversation with Codex.**
 
-A lightweight skill for discussing papers, managing sources, writing personalized HTML notes, and building literature reviews. Use it alongside Zotero, your browser, or any PDF reader. Built and maintained with Codex.
+A lightweight Codex skill for **managing and reading literature in a local workspace**. Find PDFs by copied title, explore methods and evidence, and turn your discussions into personalized HTML notes. Keep Zotero or your preferred PDF reader open alongside Codex; bring the resulting sources and notes into your next writing or presentation task.
 
-## 🚀 Quick Start
+📂 Collect → 🔎 Find → 💬 Discuss → 📝 Keep notes → 📽️ Share your understanding
 
-**1. Ask Codex to install it**
+Built and maintained with Codex.
+
+## 🚀 Start with a Conversation
+
+**1. 📦 Install the skill**
 
 ```text
 Install this skill for me: https://github.com/hwang847/codex-paper-reader.git
 ```
 
-**2. Open your paper folder in Codex**
-
-Choose any local folder, then say:
+**2. 📂 Open your paper folder in Codex**
 
 ```text
 Use $literature-workflow to prepare this folder for reading papers.
 ```
 
-Codex checks the environment and may ask a few short questions about your reading goals, language, or filing preferences. It preserves existing files and instructions, and records agreed preferences in a local `AGENTS.md`. After setup, it explains where your files belong, what is ready, anything still missing, and how to start reading. Python and PDF tools can also be set up with Codex's help; no advance configuration is needed. You can adjust your preferences later through conversation.
+Codex checks the environment, helps set up Python and PDF tools as needed, and asks about relevant reading or filing preferences. It preserves your existing files and records agreed preferences in a local `AGENTS.md`. After setup, it explains file locations, ready-to-use capabilities, and any remaining steps.
 
-**3. Drop in a PDF and start talking**
+**3. 💬 Drop in a PDF and copy its title from your reader**
 
-Keep download names such as `2508.05002v1.pdf`. Copy the paper title from your reader:
+Place new PDFs in the workspace root. Download names such as `2508.05002v1.pdf` work as they are:
 
 ```text
 Read this paper with me: <copied title>
-Walk me through the method as if I were implementing it.
+Walk me through its key idea and method as if I were implementing it.
 Now make an HTML note based on our discussion.
 ```
 
-Codex finds the corresponding local PDF through the title index. You do not need to rename files or maintain the index yourself. Scans, unusual layouts, or ambiguous titles may need a path or title correction.
+Codex uses the title index to locate the PDF and refreshes the index when the library changes. For scans or ambiguous titles, a file path or title correction helps resolve the source.
 
-## ✨ What It Helps With
+## 🔬 From a Folder of PDFs to a Working Library
 
-| You ask | Codex and the skill help you |
+| Capability | What you get |
 | --- | --- |
-| “Explain this in my research context.” | Read, translate, and discuss at your preferred depth, including experiments and appendices when relevant. |
-| “Keep the points we worked out.” | Create concise, paper-specific HTML notes with source links and PDF figure screenshots; update the same note as your understanding changes. |
-| “Organize these new papers.” | Preview title-based renaming and category folders, then file PDFs without overwriting duplicates or breaking managed links. |
-| “This code repository belongs to that paper.” | Connect PDF, arXiv, DOI, code, and documentation as sources of one reading target. |
-| “Compare these papers for my review.” | Maintain a selected source set, compare evidence, and draft a synthesis when asked. |
+| 🔎 Find by title | Match copied titles, aliases, arXiv IDs, or filenames to local PDFs. |
+| 🗂️ Organize papers | Preview title-based filenames and category folders; apply filing on request or through your saved preference. |
+| 🔗 Connect sources | Associate PDF, arXiv, DOI, code, and technical documentation with one reading target. |
+| 💬 Read for your goal | Discuss the contribution, pipeline, implementation, experiments, or writing choices at your preferred depth. |
+| 📝 Keep what matters | Request concise HTML notes with source links and PDF figure screenshots; refine the same note as the discussion develops. |
+| 📑 Compare a selected corpus | Define a review question and source set, compare evidence, and draft a synthesis with Codex. |
 
-Notes are created when requested, not after every answer. Filing is opt-in and runs when Codex invokes the workflow, not through a background watcher. Your local files remain the primary copy.
+### 🧩 How It Works
+
+- **Local title index.** Python helpers combine available BibTeX records, PDF metadata, and first-page text into `references/paper_index.jsonl`. Normalized titles and aliases support exact and fuzzy matching; lookup refreshes stale records.
+- **Source continuity.** `references/source_registry.jsonl` links multiple sources to an entity. Filing updates managed source paths, BibTeX source comments, note links, and generated survey references.
+- **Reviewable organization.** Editable keyword rules and explicit overrides propose categories. A preview precedes file moves, and collision suffixes preserve same-name PDFs.
+- **Evidence for discussion.** Page-level text and native PDF screenshots give Codex material to inspect and cite. The scripts handle repeatable file operations; Codex handles interpretation and writing.
+
+The [command reference](references/commands.md) covers these helpers. Your reader displays the paper; Codex helps you work through it.
+
+## 🛠️ Continue Creating in Codex
+
+**The library is the starting point. Your sources, notes, and discussion can become inputs to the next task.**
+
+| Next step | Try asking Codex |
+| --- | --- |
+| ✍️ Polish research notes | “Edit this note for clarity, keeping my judgments and source links.” |
+| 📄 Write or revise documents | “Turn these notes into a related-work draft,” or “Revise this report for a technical audience.” |
+| 📽️ Prepare a presentation | “Use these papers and notes to build a group-meeting deck with figures, citations, and speaker notes.” |
+
+These follow-on tasks use Codex's writing abilities and, where needed, available document or presentation skills, plugins, and tools in the [Codex ecosystem](https://developers.openai.com/plugins). This project supplies the literature workflow and reusable local materials; file-format editing and export depend on the tools in your environment. Ask Codex to help choose and configure them for the output you need.
 
 ## 🎯 Make It Yours
 
-Tell Codex what you need:
-
 ```text
-I am writing a survey. Focus on how each paper positions itself against prior work.
-When we read for paper writing, include evaluation design and relevant appendices.
+I am writing a survey. Focus on how each paper relates to prior work.
+When reading for paper writing, include evaluation design and relevant appendices.
 Remember these preferences in this workspace's AGENTS.md.
 ```
 
-You can also customize languages, note styles, categories, and your reading workflow through conversation. Existing libraries need not adopt a new folder layout.
+Language, reading depth, note style, categories, and follow-on workflows can evolve through conversation. Codex maintains your local preferences; the shared skill stays reusable across projects.
 
-New managed workspaces normally use `papers/`, `notes/` (images in `notes/assets/`), `references/`, and `surveys/`. Drop new PDFs in the workspace root; ask Codex to file them or enable that preference.
+Existing libraries can keep their layout. A new workspace normally uses `papers/`, `notes/` (figures in `notes/assets/`), `references/`, and `surveys/`. Filing runs when Codex invokes the workflow, with your local files as the primary copy.
 
-## 🔌 Optional Work Connectors
+## 🔌 Extend to Your Work Tools
 
-Want to use your research in another service? Tell Codex what you need, for example:
+Connect a service when you have a use for it. Feishu/Lark is one example:
 
 ```text
 Help me connect this workspace to Feishu for archiving selected notes.
 Find a suitable CLI on GitHub, help me install it, and keep the setup in this project.
 ```
 
-Codex checks the tool's source and compatibility, helps with authorized installation and login, and records how to use it in the workspace's `connectors/README.md` (or your existing setup notes). Feishu/Lark is just one example; other services depend on available tools. Nothing is preinstalled or automatically synced, and a connection is not required for reading or notes.
+Codex verifies the tool's source and compatibility, assists with authorized installation and login, and records usage in the workspace's `connectors/README.md` or existing setup notes. You choose the artifacts and destination for each publishing task. Other services follow the same approach, using the tools available for them.
 
-## Scope and Compatibility
+## ⚙️ Environment and Installation
 
-The skill provides a small workflow and reliable local helpers. **The host agent does the reasoning and writing.** This is not a PDF reader, an unattended research service, or a general-purpose chat bot. Bring your usual reader and choose the sources you want to study; no model API key or dedicated server is required by the skill.
-
-The package uses standard `SKILL.md` instructions with optional Python 3.9+ helpers. Codex is the primary target. Other skill-capable agents may reuse it if they support local files and command execution; installation and tool access depend on the host. PDF extraction/rendering needs optional tools that Codex can help install when needed.
-
-Safe file-moving helpers use POSIX APIs: macOS/Linux, or WSL on Windows. Native Windows filing is not supported.
+- **Host:** standard `SKILL.md` packaging, primarily for Codex. Other skill-capable agents can reuse it with local file and command access; setup depends on the host.
+- **Local helpers:** Python 3.9+, with text extraction and rendering supplied by tools such as PyMuPDF or Poppler. Codex can help set these up on demand.
+- **File organization:** POSIX file-moving APIs, for macOS/Linux or Windows through WSL. Current validation runs on macOS.
 
 <details>
-<summary>Manual installation or an existing setup</summary>
+<summary>📦 Manual installation or updating an existing copy</summary>
 
-For a new Codex installation:
+For a fresh installation:
 
 ```sh
 mkdir -p ~/.agents/skills
 git clone https://github.com/hwang847/codex-paper-reader.git ~/.agents/skills/literature-workflow
 ```
 
-Already installed under `~/.codex/skills` or another supported location? Ask Codex to update that copy while preserving your changes; do not install a duplicate. If the skill is not detected, restart the Codex session.
+Already installed under `~/.codex/skills` or another supported location? Ask Codex to update that copy while preserving your changes. If discovery needs a refresh, restart the Codex session. See [Codex skill setup](https://learn.chatgpt.com/docs/build-skills) for host-specific guidance.
 
 </details>
 
-[Changes](CHANGELOG.md) · [Customize or contribute](CONTRIBUTING.md) · [License](LICENSE)
+[🗒️ Changes](CHANGELOG.md) · [🛠️ Customize or contribute](CONTRIBUTING.md) · [📜 License](LICENSE)

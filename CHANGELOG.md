@@ -2,6 +2,13 @@
 
 [中文](CHANGELOG.zh-CN.md)
 
+## 2026-10-13: Local Library, Broader Creative Workflow
+
+- Reworked all five READMEs around local literature management and reading, with a three-step quickstart and clearer visual navigation.
+- Explained title indexing, multi-source records, previewed filing, and page-level evidence using the existing implementation.
+- Added optional paths from notes to polished writing, documents, and presentations through available Codex ecosystem tools; kept work connectors as extensions.
+- Documentation-only update; skill behavior, command interfaces, and workspace formats are unchanged.
+
 ## 2026-10-13: Optional Work Connectors
 
 - Kept reading, sources, notes, and surveys as the core; moved Feishu/Lark to an example of optional work connectors in all five READMEs.
